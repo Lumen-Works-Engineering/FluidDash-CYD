@@ -238,6 +238,7 @@ void setupWebServer();
 String getMainHTML();
 String getSettingsHTML();
 String getAdminHTML();
+String getWiFiConfigHTML();
 String getConfigJSON();
 String getStatusJSON();
 void connectFluidNC();
@@ -320,8 +321,21 @@ void setup() {
 
   // Try to connect to saved WiFi credentials
   Serial.println("Attempting WiFi connection...");
-  WiFi.mode(WIFI_STA);
-  WiFi.begin();  // Try to connect with saved credentials
+
+  // Read WiFi credentials from preferences
+  prefs.begin("cnc-guardian", true);
+  String wifi_ssid = prefs.getString("wifi_ssid", "");
+  String wifi_pass = prefs.getString("wifi_pass", "");
+  prefs.end();
+
+  if (wifi_ssid.length() > 0) {
+    Serial.println("Connecting to: " + wifi_ssid);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+  } else {
+    Serial.println("No saved WiFi credentials");
+    WiFi.mode(WIFI_STA);
+  }
 
   feedLoopWDT();
 
@@ -596,7 +610,12 @@ void setupWebServer() {
   server.on("/admin", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "text/html", getAdminHTML());
   });
-  
+
+  // WiFi configuration page
+  server.on("/wifi", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", getWiFiConfigHTML());
+  });
+
   // API: Get current config as JSON
   server.on("/api/config", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "application/json", getConfigJSON());
@@ -679,7 +698,90 @@ void setupWebServer() {
     delay(1000);
     ESP.restart();
   });
-  
+
+  // API: Scan for WiFi networks
+  server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *request){
+    Serial.println("Scanning WiFi networks...");
+    int numNetworks = WiFi.scanNetworks();
+
+    String json = "{\"networks\":[";
+    for (int i = 0; i < numNetworks; i++) {
+      if (i > 0) json += ",";
+      json += "{";
+      json += "\"ssid\":\"" + WiFi.SSID(i) + "\",";
+      json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
+      json += "\"encryption\":" + String(WiFi.encryptionType(i));
+      json += "}";
+    }
+    json += "]}";
+
+    WiFi.scanDelete();  // Free memory
+    request->send(200, "application/json", json);
+  });
+
+  // API: Connect to WiFi network
+  server.on("/api/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request){
+    String ssid = "";
+    String password = "";
+
+    if (request->hasParam("ssid", true)) {
+      ssid = request->getParam("ssid", true)->value();
+    }
+    if (request->hasParam("password", true)) {
+      password = request->getParam("password", true)->value();
+    }
+
+    if (ssid.length() == 0) {
+      request->send(200, "application/json", "{\"success\":false,\"message\":\"SSID required\"}");
+      return;
+    }
+
+    Serial.println("Attempting to connect to: " + ssid);
+
+    // Store credentials in preferences
+    prefs.begin("cnc-guardian", false);
+    prefs.putString("wifi_ssid", ssid);
+    prefs.putString("wifi_pass", password);
+    prefs.end();
+
+    // Send response before attempting connection
+    request->send(200, "application/json", "{\"success\":true,\"message\":\"Connecting...\"}");
+
+    // Disconnect from AP mode if active
+    if (inAPMode) {
+      WiFi.softAPdisconnect(true);
+      inAPMode = false;
+    }
+
+    // Try to connect
+    WiFi.disconnect();
+    delay(100);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), password.c_str());
+
+    // Wait up to 10 seconds for connection
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+      delay(500);
+      attempts++;
+      Serial.print(".");
+    }
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("Connected successfully!");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+
+      // Restart to apply all WiFi-dependent services
+      delay(2000);
+      ESP.restart();
+    } else {
+      Serial.println("Connection failed!");
+      // Note: Response already sent, device will stay in current mode
+    }
+  });
+
   server.begin();
   Serial.println("Web server started");
 }
@@ -748,8 +850,8 @@ String getMainHTML() {
       <h2>Configuration</h2>
       <a href='/settings' class='link-button'><button>⚙️ User Settings</button></a>
       <a href='/admin' class='link-button'><button>🔧 Admin/Calibration</button></a>
+      <a href='/wifi' class='link-button'><button>📡 WiFi Setup</button></a>
       <button onclick='restart()'>🔄 Restart Device</button>
-      <button onclick='resetWiFi()'>📡 Reset WiFi</button>
     </div>
     
     <div class='card'>
@@ -1037,6 +1139,183 @@ String getAdminHTML() {
     
     updateReadings();
     setInterval(updateReadings, 2000);
+  </script>
+</body>
+</html>
+)";
+  return html;
+}
+
+String getWiFiConfigHTML() {
+  String html;
+  html.reserve(5120);
+
+  // Get current WiFi status
+  String currentSSID = WiFi.SSID();
+  String currentIP = WiFi.localIP().toString();
+  bool isConnected = (WiFi.status() == WL_CONNECTED);
+  bool isAPMode = inAPMode;
+
+  html = R"(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>WiFi Setup - CNC Guardian</title>
+  <style>
+    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1 { color: #00bfff; }
+    h2 { color: #00ff00; }
+    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
+    .status { padding: 15px; border-radius: 5px; margin: 15px 0; font-weight: bold; }
+    .status-connected { background: #00ff00; color: #000; }
+    .status-ap { background: #ff9900; color: #000; }
+    .status-disconnected { background: #ff0000; color: #fff; }
+    label { display: block; margin: 15px 0 5px; color: #aaa; }
+    input, select { width: 100%; padding: 10px; background: #333; color: #fff;
+            border: 1px solid #555; border-radius: 5px; box-sizing: border-box;
+            font-size: 16px; }
+    button { background: #00bfff; color: #fff; border: none; padding: 12px 24px;
+             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px 0 0; }
+    button:hover { background: #0099cc; }
+    .scan-btn { background: #00ff00; color: #000; }
+    .scan-btn:hover { background: #00cc00; }
+    .back-btn { background: #666; }
+    .back-btn:hover { background: #555; }
+    .network-list { max-height: 300px; overflow-y: auto; }
+    .network-item { padding: 10px; background: #333; margin: 5px 0; border-radius: 5px;
+                    cursor: pointer; display: flex; justify-content: space-between;
+                    align-items: center; }
+    .network-item:hover { background: #444; }
+    .network-name { font-weight: bold; }
+    .network-signal { color: #00ff00; font-size: 12px; }
+    .loading { color: #00bfff; text-align: center; padding: 20px; display: none; }
+    .message { padding: 10px; border-radius: 5px; margin: 10px 0; display: none; }
+    .success { background: #00ff00; color: #000; }
+    .error { background: #ff0000; color: #fff; }
+    #password { -webkit-text-security: disc; }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>📡 WiFi Configuration</h1>
+
+)";
+
+  // Add current status
+  html += "<div class='status ";
+  if (isAPMode) {
+    html += "status-ap'>🔧 AP Mode Active - Configure WiFi to connect to your network</div>";
+  } else if (isConnected) {
+    html += "status-connected'>✅ Connected to: " + currentSSID + "<br>IP: " + currentIP + "</div>";
+  } else {
+    html += "status-disconnected'>❌ Not Connected - Configure WiFi below</div>";
+  }
+
+  html += R"(
+
+    <div class='card'>
+      <h2>Scan for Networks</h2>
+      <button class='scan-btn' onclick='scanNetworks()'>🔍 Scan WiFi Networks</button>
+      <div class='loading' id='loading'>Scanning...</div>
+      <div class='network-list' id='networks'></div>
+    </div>
+
+    <form id='wifiForm'>
+      <div class='card'>
+        <h2>WiFi Credentials</h2>
+
+        <label>Network Name (SSID)</label>
+        <input type='text' id='ssid' name='ssid' value=')" + currentSSID + R"(' required
+               placeholder='Enter WiFi network name'>
+
+        <label>Password</label>
+        <input type='password' id='password' name='password' required
+               placeholder='Enter WiFi password'>
+
+        <div class='message' id='message'></div>
+
+        <button type='submit'>💾 Save & Connect</button>
+        <button type='button' class='back-btn' onclick='location.href="/"'>← Back</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    function scanNetworks() {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('networks').innerHTML = '';
+
+      fetch('/api/wifi/scan')
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById('loading').style.display = 'none';
+          let html = '';
+          data.networks.forEach(net => {
+            let signal = net.rssi > -50 ? '📶📶📶📶' :
+                        net.rssi > -60 ? '📶📶📶' :
+                        net.rssi > -70 ? '📶📶' : '📶';
+            html += `<div class='network-item' onclick='selectNetwork("${net.ssid}")'>
+                      <span class='network-name'>${net.ssid}</span>
+                      <span class='network-signal'>${signal} ${net.rssi}dBm</span>
+                    </div>`;
+          });
+          if (html === '') {
+            html = '<p style="color:#888;text-align:center">No networks found</p>';
+          }
+          document.getElementById('networks').innerHTML = html;
+        })
+        .catch(err => {
+          document.getElementById('loading').style.display = 'none';
+          document.getElementById('networks').innerHTML =
+            '<p style="color:#ff0000">Scan failed. Try again.</p>';
+        });
+    }
+
+    function selectNetwork(ssid) {
+      document.getElementById('ssid').value = ssid;
+      document.getElementById('password').focus();
+    }
+
+    document.getElementById('wifiForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      let ssid = document.getElementById('ssid').value;
+      let password = document.getElementById('password').value;
+      let msgDiv = document.getElementById('message');
+
+      msgDiv.style.display = 'block';
+      msgDiv.className = 'message';
+      msgDiv.textContent = 'Connecting to ' + ssid + '...';
+
+      let formData = new FormData();
+      formData.append('ssid', ssid);
+      formData.append('password', password);
+
+      fetch('/api/wifi/connect', {
+        method: 'POST',
+        body: new URLSearchParams(formData)
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          msgDiv.className = 'message success';
+          msgDiv.innerHTML = '✅ Connected successfully!<br>Device will restart in 3 seconds...';
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 3000);
+        } else {
+          msgDiv.className = 'message error';
+          msgDiv.textContent = '❌ Connection failed: ' + data.message;
+        }
+      })
+      .catch(err => {
+        msgDiv.className = 'message error';
+        msgDiv.textContent = '❌ Request failed. Check connection.';
+      });
+    });
   </script>
 </body>
 </html>
