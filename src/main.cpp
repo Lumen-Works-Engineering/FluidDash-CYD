@@ -351,11 +351,6 @@ void setup() {
 
     feedLoopWDT();
 
-    // Start web server
-    setupWebServer();
-
-    feedLoopWDT();
-
     // Connect to FluidNC
     if (cfg.fluidnc_auto_discover) {
       discoverFluidNC();
@@ -371,6 +366,11 @@ void setup() {
     feedLoopWDT();
   }
 
+  feedLoopWDT();
+
+  // Start web server (always available in STA, AP, or standalone mode)
+  Serial.println("Starting web server...");
+  setupWebServer();
   feedLoopWDT();
 
   sessionStartTime = millis();
