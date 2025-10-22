@@ -75,7 +75,8 @@ public:
 enum DisplayMode {
   MODE_MONITOR,
   MODE_ALIGNMENT,
-  MODE_GRAPH
+  MODE_GRAPH,
+  MODE_NETWORK
 };
 
 // Configuration Structure
@@ -206,6 +207,9 @@ bool fluidncConnected = false;
 unsigned long jobStartTime = 0;
 bool isJobRunning = false;
 
+// WiFi AP mode flag
+bool inAPMode = false;
+
 // Timing
 unsigned long lastTachRead = 0;
 unsigned long lastDisplayUpdate = 0;
@@ -255,6 +259,8 @@ void drawAlignmentMode();
 void updateAlignmentMode();
 void drawGraphMode();
 void updateGraphMode();
+void drawNetworkMode();
+void updateNetworkMode();
 void drawTempGraph(int x, int y, int w, int h);
 void handleButton();
 void cycleDisplayMode();
@@ -312,38 +318,59 @@ void setup() {
   // Allocate history buffer based on config
   allocateHistoryBuffer();
 
-  // WiFiManager setup with custom parameters
-  setupWiFiManager();
+  // Try to connect to saved WiFi credentials
+  Serial.println("Attempting WiFi connection...");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin();  // Try to connect with saved credentials
 
-  // Connect to WiFi (auto or captive portal)
-  feedLoopWDT();  // Reset watchdog before long operation
-  if (!wm.autoConnect("CNC-Guardian-Setup")) {
-    Serial.println("Failed to connect - restarting");
-    delay(3000);
-    ESP.restart();
-  }
-
-  // WiFi connected
-  Serial.println("WiFi Connected!");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
-
-  // Set up mDNS
-  if (MDNS.begin(cfg.device_name)) {
-    Serial.printf("mDNS started: http://%s.local\n", cfg.device_name);
-    MDNS.addService("http", "tcp", 80);
-  }
-
-  // Start web server
-  setupWebServer();
-
-  // Connect to FluidNC
   feedLoopWDT();
-  if (cfg.fluidnc_auto_discover) {
-    discoverFluidNC();
-  } else {
-    connectFluidNC();
+
+  // Wait up to 10 seconds for connection
+  int wifi_retry = 0;
+  while (WiFi.status() != WL_CONNECTED && wifi_retry < 20) {
+    delay(500);
+    Serial.print(".");
+    wifi_retry++;
+    feedLoopWDT();
   }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    // Successfully connected to WiFi
+    Serial.println("WiFi Connected!");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+
+    feedLoopWDT();
+
+    // Set up mDNS
+    if (MDNS.begin(cfg.device_name)) {
+      Serial.printf("mDNS started: http://%s.local\n", cfg.device_name);
+      MDNS.addService("http", "tcp", 80);
+    }
+
+    feedLoopWDT();
+
+    // Start web server
+    setupWebServer();
+
+    feedLoopWDT();
+
+    // Connect to FluidNC
+    if (cfg.fluidnc_auto_discover) {
+      discoverFluidNC();
+    } else {
+      connectFluidNC();
+    }
+    feedLoopWDT();
+  } else {
+    // WiFi connection failed - continue in standalone mode
+    Serial.println("WiFi connection failed - continuing in standalone mode");
+    Serial.println("Hold button for 10 seconds to enter WiFi configuration mode");
+
+    feedLoopWDT();
+  }
+
   feedLoopWDT();
 
   sessionStartTime = millis();
@@ -353,8 +380,12 @@ void setup() {
   delay(2000);
   feedLoopWDT();
 
+  // Clear splash screen and draw the main interface
+  Serial.println("Drawing main interface...");
+  drawScreen();
+  feedLoopWDT();
+
   Serial.println("Setup complete - entering main loop");
-  // Note: drawScreen() is called in updateDisplay() during loop()
   feedLoopWDT();
 }
 
@@ -1292,7 +1323,7 @@ void updateTempHistory() {
 
 void drawScreen() {
   gfx->fillScreen(COLOR_BG);
-  
+
   switch(currentMode) {
     case MODE_MONITOR:
       drawMonitorMode();
@@ -1302,6 +1333,9 @@ void drawScreen() {
       break;
     case MODE_GRAPH:
       drawGraphMode();
+      break;
+    case MODE_NETWORK:
+      drawNetworkMode();
       break;
   }
 }
@@ -1355,6 +1389,8 @@ void updateDisplay() {
     updateAlignmentMode();
   } else if (currentMode == MODE_GRAPH) {
     updateGraphMode();
+  } else if (currentMode == MODE_NETWORK) {
+    updateNetworkMode();
   }
 }
 
@@ -1594,6 +1630,143 @@ void updateGraphMode() {
   drawTempGraph(20, 40, 440, 270);
 }
 
+void drawNetworkMode() {
+  // Header
+  gfx->fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
+  gfx->setTextColor(COLOR_TEXT);
+  gfx->setTextSize(2);
+  gfx->setCursor(120, 6);
+  gfx->print("NETWORK STATUS");
+
+  gfx->drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
+
+  gfx->setTextSize(2);
+  gfx->setTextColor(COLOR_TEXT);
+
+  if (inAPMode) {
+    // AP Mode display
+    gfx->setCursor(60, 50);
+    gfx->setTextColor(COLOR_WARN);
+    gfx->print("WiFi Config Mode Active");
+
+    gfx->setTextSize(1);
+    gfx->setTextColor(COLOR_TEXT);
+    gfx->setCursor(10, 90);
+    gfx->print("1. Connect to WiFi network:");
+
+    gfx->setTextSize(2);
+    gfx->setTextColor(COLOR_VALUE);
+    gfx->setCursor(40, 110);
+    gfx->print("CNC-Guardian-Setup");
+
+    gfx->setTextSize(1);
+    gfx->setTextColor(COLOR_TEXT);
+    gfx->setCursor(10, 145);
+    gfx->print("2. Open browser and go to:");
+
+    gfx->setTextSize(2);
+    gfx->setTextColor(COLOR_VALUE);
+    gfx->setCursor(80, 165);
+    gfx->print("http://192.168.4.1");
+
+    gfx->setTextSize(1);
+    gfx->setTextColor(COLOR_TEXT);
+    gfx->setCursor(10, 200);
+    gfx->print("3. Configure your WiFi settings");
+
+    gfx->setCursor(10, 230);
+    gfx->setTextColor(COLOR_LINE);
+    gfx->print("Temperature monitoring continues in background");
+
+    // Show to exit AP mode
+    gfx->setTextColor(COLOR_ORANGE);
+    gfx->setCursor(10, 270);
+    gfx->print("Press button briefly to return to monitoring");
+
+  } else {
+    // Normal network status display
+    if (WiFi.status() == WL_CONNECTED) {
+      gfx->setCursor(130, 50);
+      gfx->setTextColor(COLOR_GOOD);
+      gfx->print("WiFi Connected");
+
+      gfx->setTextSize(1);
+      gfx->setTextColor(COLOR_TEXT);
+
+      gfx->setCursor(10, 90);
+      gfx->print("SSID:");
+      gfx->setTextColor(COLOR_VALUE);
+      gfx->setCursor(80, 90);
+      gfx->print(WiFi.SSID());
+
+      gfx->setTextColor(COLOR_TEXT);
+      gfx->setCursor(10, 115);
+      gfx->print("IP Address:");
+      gfx->setTextColor(COLOR_VALUE);
+      gfx->setCursor(80, 115);
+      gfx->print(WiFi.localIP());
+
+      gfx->setTextColor(COLOR_TEXT);
+      gfx->setCursor(10, 140);
+      gfx->print("Signal:");
+      gfx->setTextColor(COLOR_VALUE);
+      gfx->setCursor(80, 140);
+      int rssi = WiFi.RSSI();
+      gfx->printf("%d dBm", rssi);
+
+      gfx->setTextColor(COLOR_TEXT);
+      gfx->setCursor(10, 165);
+      gfx->print("mDNS:");
+      gfx->setTextColor(COLOR_VALUE);
+      gfx->setCursor(80, 165);
+      gfx->printf("http://%s.local", cfg.device_name);
+
+      if (fluidncConnected) {
+        gfx->setTextColor(COLOR_TEXT);
+        gfx->setCursor(10, 190);
+        gfx->print("FluidNC:");
+        gfx->setTextColor(COLOR_GOOD);
+        gfx->setCursor(80, 190);
+        gfx->print("Connected");
+      } else {
+        gfx->setTextColor(COLOR_TEXT);
+        gfx->setCursor(10, 190);
+        gfx->print("FluidNC:");
+        gfx->setTextColor(COLOR_WARN);
+        gfx->setCursor(80, 190);
+        gfx->print("Disconnected");
+      }
+
+    } else {
+      gfx->setCursor(120, 50);
+      gfx->setTextColor(COLOR_WARN);
+      gfx->print("WiFi Not Connected");
+
+      gfx->setTextSize(1);
+      gfx->setTextColor(COLOR_TEXT);
+      gfx->setCursor(10, 100);
+      gfx->print("Temperature monitoring active (standalone mode)");
+
+      gfx->setCursor(10, 130);
+      gfx->setTextColor(COLOR_ORANGE);
+      gfx->print("To configure WiFi:");
+    }
+
+    // Instructions for entering AP mode
+    gfx->setTextSize(1);
+    gfx->setTextColor(COLOR_LINE);
+    gfx->setCursor(10, 250);
+    gfx->print("Hold button for 10 seconds to enter WiFi");
+    gfx->setCursor(10, 265);
+    gfx->print("configuration mode");
+  }
+}
+
+void updateNetworkMode() {
+  // Update time in header if needed - but network info is mostly static
+  // Could add dynamic signal strength updates here
+}
+
 void drawTempGraph(int x, int y, int w, int h) {
   gfx->fillRect(x, y, w, h, COLOR_BG);
   gfx->drawRect(x, y, w, h, COLOR_LINE);
@@ -1662,7 +1835,7 @@ void handleButton() {
 }
 
 void cycleDisplayMode() {
-  currentMode = (DisplayMode)((currentMode + 1) % 3);
+  currentMode = (DisplayMode)((currentMode + 1) % 4);  // Now we have 4 modes
   drawScreen();
   
   // Flash mode name
@@ -1702,30 +1875,25 @@ void showHoldProgress() {
 }
 
 void enterSetupMode() {
-  gfx->fillScreen(COLOR_BG);
-  gfx->setTextColor(COLOR_HEADER);
-  gfx->setTextSize(3);
-  gfx->setCursor(120, 100);
-  gfx->println("SETUP MODE");
-  
-  gfx->setTextSize(2);
-  gfx->setCursor(80, 160);
-  gfx->setTextColor(COLOR_TEXT);
-  gfx->println("Configuration:");
-  
-  gfx->setTextColor(COLOR_VALUE);
-  gfx->setCursor(60, 200);
-  gfx->print(cfg.device_name);
-  gfx->print(".local");
-  
-  gfx->setTextSize(1);
-  gfx->setCursor(120, 240);
-  gfx->setTextColor(COLOR_LINE);
-  gfx->print("OR: ");
-  gfx->print(WiFi.localIP());
-  
-  delay(5000);
+  Serial.println("Entering WiFi configuration AP mode...");
+
+  // Stop any existing WiFi connection
+  WiFi.disconnect();
+  delay(100);
+
+  // Start in AP mode
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("CNC-Guardian-Setup");
+  inAPMode = true;
+
+  Serial.print("AP started. IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  // Show AP mode screen
+  currentMode = MODE_NETWORK;
   drawScreen();
+
+  Serial.println("WiFi configuration AP active. Device will continue monitoring.");
 }
 
 void showSplashScreen() {
