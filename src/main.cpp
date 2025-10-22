@@ -1,5 +1,5 @@
 /*
- * CNC GUARDIAN v07 - Full Configuration System
+ * Rename from CNC GUARDIAN v07 to FluidDash v01
  * - WiFiManager for initial setup
  * - Preferences for persistent storage
  * - Web interface for all settings
@@ -130,9 +130,9 @@ struct Config {
 Config cfg;
 
 void initDefaultConfig() {
-  strcpy(cfg.device_name, "cnc-guardian");
+  strcpy(cfg.device_name, "fluiddash");
   strcpy(cfg.fluidnc_ip, "192.168.73.13");
-  cfg.fluidnc_port = 81;
+  cfg.fluidnc_port = 81;  // FluidNC WebSocket default port
   cfg.fluidnc_auto_discover = true;
 
   cfg.temp_threshold_low = 30.0;
@@ -141,13 +141,13 @@ void initDefaultConfig() {
   cfg.temp_offset_x = 0.0;
   cfg.temp_offset_yl = 0.0;
   cfg.temp_offset_yr = 0.0;
-cfg.temp_offset_z = 0.0;
-cfg.fan_min_speed = 30;
-cfg.fan_max_speed_limit = 100;
+  cfg.temp_offset_z = 0.0;
+  cfg.fan_min_speed = 30;
+  cfg.fan_max_speed_limit = 100;
 
   cfg.psu_voltage_cal = 7.3;
-  cfg.psu_alert_low = 22.0;
-  cfg.psu_alert_high = 26.0;
+  cfg.psu_alert_low = 23.0;
+  cfg.psu_alert_high = 25.0;
 
   cfg.brightness = 255;
   cfg.default_mode = MODE_MONITOR;
@@ -158,7 +158,7 @@ cfg.fan_max_speed_limit = 100;
   cfg.graph_timespan_seconds = 300;  // 5 minutes default
   cfg.graph_update_interval = 5;      // 5 seconds per point
 
-  cfg.use_fahrenheit = false;
+  cfg.use_fahrenheit = true;
   cfg.use_inches = false;
 
   cfg.enable_logging = false;
@@ -278,7 +278,7 @@ void IRAM_ATTR tachISR() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("CNC Guardian v07 - Starting...");
+  Serial.println("FluidDash - Starting...");
 
   // Initialize default configuration
   initDefaultConfig();
@@ -323,7 +323,7 @@ void setup() {
   Serial.println("Attempting WiFi connection...");
 
   // Read WiFi credentials from preferences
-  prefs.begin("cnc-guardian", true);
+  prefs.begin("fluiddash", true);
   String wifi_ssid = prefs.getString("wifi_ssid", "");
   String wifi_pass = prefs.getString("wifi_pass", "");
   prefs.end();
@@ -452,11 +452,11 @@ void loop() {
 // ========== Configuration Management ==========
 
 void loadConfig() {
-  prefs.begin("cnc-guardian", true);
+  prefs.begin("fluiddash", true);
   
-  strlcpy(cfg.device_name, prefs.getString("dev_name", "cnc-guardian").c_str(), 32);
+  strlcpy(cfg.device_name, prefs.getString("dev_name", "fluiddash").c_str(), 32);
   strlcpy(cfg.fluidnc_ip, prefs.getString("fnc_ip", "192.168.73.13").c_str(), 16);
-  cfg.fluidnc_port = prefs.getUShort("fnc_port", 81);
+  cfg.fluidnc_port = prefs.getUShort("fnc_port", 81);  // FluidNC WebSocket default port
   cfg.fluidnc_auto_discover = prefs.getBool("fnc_auto", true);
   
   cfg.temp_threshold_low = prefs.getFloat("temp_low", 30.0);
@@ -494,7 +494,7 @@ void loadConfig() {
 }
 
 void saveConfig() {
-  prefs.begin("cnc-guardian", false);
+  prefs.begin("fluiddash", false);
   
   prefs.putString("dev_name", cfg.device_name);
   prefs.putString("fnc_ip", cfg.fluidnc_ip);
@@ -572,7 +572,6 @@ void allocateHistoryBuffer() {
                 historySize, cfg.graph_timespan_seconds, historySize * sizeof(float));
 }
 
-// Continue in next message due to length...
 // ========== WiFiManager Setup ==========
 
 void setupWiFiManager() {
@@ -699,25 +698,8 @@ void setupWebServer() {
     ESP.restart();
   });
 
-  // API: Scan for WiFi networks
-  server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *request){
-    Serial.println("Scanning WiFi networks...");
-    int numNetworks = WiFi.scanNetworks();
-
-    String json = "{\"networks\":[";
-    for (int i = 0; i < numNetworks; i++) {
-      if (i > 0) json += ",";
-      json += "{";
-      json += "\"ssid\":\"" + WiFi.SSID(i) + "\",";
-      json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
-      json += "\"encryption\":" + String(WiFi.encryptionType(i));
-      json += "}";
-    }
-    json += "]}";
-
-    WiFi.scanDelete();  // Free memory
-    request->send(200, "application/json", json);
-  });
+  // WiFi scanning removed - ESP32 cannot scan while in AP mode
+  // Users must manually enter SSID and password
 
   // API: Connect to WiFi network
   server.on("/api/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request){
@@ -739,47 +721,17 @@ void setupWebServer() {
     Serial.println("Attempting to connect to: " + ssid);
 
     // Store credentials in preferences
-    prefs.begin("cnc-guardian", false);
+    prefs.begin("fluiddash", false);
     prefs.putString("wifi_ssid", ssid);
     prefs.putString("wifi_pass", password);
     prefs.end();
 
-    // Send response before attempting connection
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Connecting...\"}");
+    // Send response and restart to apply credentials
+    request->send(200, "application/json", "{\"success\":true,\"message\":\"Credentials saved. Device will restart and attempt to connect.\"}");
 
-    // Disconnect from AP mode if active
-    if (inAPMode) {
-      WiFi.softAPdisconnect(true);
-      inAPMode = false;
-    }
-
-    // Try to connect
-    WiFi.disconnect();
-    delay(100);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid.c_str(), password.c_str());
-
-    // Wait up to 10 seconds for connection
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-      delay(500);
-      attempts++;
-      Serial.print(".");
-    }
-    Serial.println();
-
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("Connected successfully!");
-      Serial.print("IP: ");
-      Serial.println(WiFi.localIP());
-
-      // Restart to apply all WiFi-dependent services
-      delay(2000);
-      ESP.restart();
-    } else {
-      Serial.println("Connection failed!");
-      // Note: Response already sent, device will stay in current mode
-    }
+    Serial.println("WiFi credentials saved. Restarting...");
+    delay(2000);
+    ESP.restart();
   });
 
   server.begin();
@@ -801,7 +753,7 @@ String getMainHTML() {
 <head>
   <meta charset='utf-8'>
   <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <title>CNC Guardian</title>
+  <title>FluidDash</title>
   <style>
     body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
     .container { max-width: 800px; margin: 0 auto; }
@@ -822,7 +774,7 @@ String getMainHTML() {
 </head>
 <body>
   <div class='container'>
-    <h1>🛡️ CNC Guardian</h1>
+    <h1>🛡️ FluidDash</h1>
     
     <div class='card'>
       <h2>System Status</h2>
@@ -897,7 +849,7 @@ String getMainHTML() {
     function resetWiFi() {
       if (confirm('Reset WiFi settings? Device will restart in AP mode.')) {
         fetch('/api/reset-wifi', {method: 'POST'})
-          .then(() => alert('WiFi reset. Connect to CNC-Guardian-Setup network.'));
+          .then(() => alert('WiFi reset. Connect to FluidDash-Setup network.'));
       }
     }
     
@@ -919,7 +871,7 @@ String getSettingsHTML() {
 <head>
   <meta charset='utf-8'>
   <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <title>Settings - CNC Guardian</title>
+  <title>Settings - FluidDash</title>
   <style>
     body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
     .container { max-width: 600px; margin: 0 auto; }
@@ -1037,7 +989,7 @@ String getAdminHTML() {
 <head>
   <meta charset='utf-8'>
   <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <title>Admin - CNC Guardian</title>
+  <title>Admin - FluidDash</title>
   <style>
     body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
     .container { max-width: 600px; margin: 0 auto; }
@@ -1162,7 +1114,7 @@ String getWiFiConfigHTML() {
 <head>
   <meta charset='utf-8'>
   <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <title>WiFi Setup - CNC Guardian</title>
+  <title>WiFi Setup - FluidDash</title>
   <style>
     body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
     .container { max-width: 600px; margin: 0 auto; }
@@ -1180,22 +1132,13 @@ String getWiFiConfigHTML() {
     button { background: #00bfff; color: #fff; border: none; padding: 12px 24px;
              border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px 0 0; }
     button:hover { background: #0099cc; }
-    .scan-btn { background: #00ff00; color: #000; }
-    .scan-btn:hover { background: #00cc00; }
     .back-btn { background: #666; }
     .back-btn:hover { background: #555; }
-    .network-list { max-height: 300px; overflow-y: auto; }
-    .network-item { padding: 10px; background: #333; margin: 5px 0; border-radius: 5px;
-                    cursor: pointer; display: flex; justify-content: space-between;
-                    align-items: center; }
-    .network-item:hover { background: #444; }
-    .network-name { font-weight: bold; }
-    .network-signal { color: #00ff00; font-size: 12px; }
-    .loading { color: #00bfff; text-align: center; padding: 20px; display: none; }
     .message { padding: 10px; border-radius: 5px; margin: 10px 0; display: none; }
     .success { background: #00ff00; color: #000; }
     .error { background: #ff0000; color: #fff; }
     #password { -webkit-text-security: disc; }
+    .info-box { background: #1a3a5a; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #00bfff; }
   </style>
 </head>
 <body>
@@ -1216,11 +1159,9 @@ String getWiFiConfigHTML() {
 
   html += R"(
 
-    <div class='card'>
-      <h2>Scan for Networks</h2>
-      <button class='scan-btn' onclick='scanNetworks()'>🔍 Scan WiFi Networks</button>
-      <div class='loading' id='loading'>Scanning...</div>
-      <div class='network-list' id='networks'></div>
+    <div class='info-box'>
+      <strong>ℹ️ Manual WiFi Configuration</strong><br>
+      Enter your WiFi network name (SSID) and password below. The device will restart and attempt to connect.
     </div>
 
     <form id='wifiForm'>
@@ -1244,40 +1185,6 @@ String getWiFiConfigHTML() {
   </div>
 
   <script>
-    function scanNetworks() {
-      document.getElementById('loading').style.display = 'block';
-      document.getElementById('networks').innerHTML = '';
-
-      fetch('/api/wifi/scan')
-        .then(r => r.json())
-        .then(data => {
-          document.getElementById('loading').style.display = 'none';
-          let html = '';
-          data.networks.forEach(net => {
-            let signal = net.rssi > -50 ? '📶📶📶📶' :
-                        net.rssi > -60 ? '📶📶📶' :
-                        net.rssi > -70 ? '📶📶' : '📶';
-            html += `<div class='network-item' onclick='selectNetwork("${net.ssid}")'>
-                      <span class='network-name'>${net.ssid}</span>
-                      <span class='network-signal'>${signal} ${net.rssi}dBm</span>
-                    </div>`;
-          });
-          if (html === '') {
-            html = '<p style="color:#888;text-align:center">No networks found</p>';
-          }
-          document.getElementById('networks').innerHTML = html;
-        })
-        .catch(err => {
-          document.getElementById('loading').style.display = 'none';
-          document.getElementById('networks').innerHTML =
-            '<p style="color:#ff0000">Scan failed. Try again.</p>';
-        });
-    }
-
-    function selectNetwork(ssid) {
-      document.getElementById('ssid').value = ssid;
-      document.getElementById('password').focus();
-    }
 
     document.getElementById('wifiForm').addEventListener('submit', function(e) {
       e.preventDefault();
@@ -1367,8 +1274,8 @@ String getStatusJSON() {
 // ========== FluidNC Connection ==========
 
 void connectFluidNC() {
-  Serial.printf("[FluidNC] Attempting to connect to %s:%d\n", cfg.fluidnc_ip, cfg.fluidnc_port);
-  webSocket.begin(cfg.fluidnc_ip, cfg.fluidnc_port, "/");
+  Serial.printf("[FluidNC] Attempting to connect to ws://%s:%d/ws\n", cfg.fluidnc_ip, cfg.fluidnc_port);
+  webSocket.begin(cfg.fluidnc_ip, cfg.fluidnc_port, "/ws");
   webSocket.onEvent(fluidNCWebSocketEvent);
   webSocket.setReconnectInterval(5000);
   Serial.println("[FluidNC] WebSocket initialized, waiting for connection...");
@@ -1625,7 +1532,7 @@ void drawMonitorMode() {
   gfx->setTextColor(COLOR_TEXT);
   gfx->setTextSize(2);
   gfx->setCursor(10, 6);
-  gfx->print("CNC GUARDIAN");
+  gfx->print("FluidDash");
   
   // Dividers
   gfx->drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
@@ -1936,7 +1843,7 @@ void drawNetworkMode() {
     gfx->setTextSize(2);
     gfx->setTextColor(COLOR_VALUE);
     gfx->setCursor(40, 110);
-    gfx->print("CNC-Guardian-Setup");
+    gfx->print("FluidDash-Setup");
 
     gfx->setTextSize(1);
     gfx->setTextColor(COLOR_TEXT);
@@ -2102,13 +2009,13 @@ void handleButton() {
     unsigned long pressDuration = millis() - buttonPressStart;
     buttonPressed = false;
     
-    if (pressDuration >= 10000) {
+    if (pressDuration >= 5000) {
       enterSetupMode();
     } else if (pressDuration < 1000) {
       cycleDisplayMode();
     }
   }
-  else if (buttonPressed && (millis() - buttonPressStart >= 3000)) {
+  else if (buttonPressed && (millis() - buttonPressStart >= 2000)) {
     showHoldProgress();
   }
 }
@@ -2135,7 +2042,7 @@ void cycleDisplayMode() {
 
 void showHoldProgress() {
   unsigned long elapsed = millis() - buttonPressStart;
-  int progress = map(elapsed, 3000, 10000, 0, 100);
+  int progress = map(elapsed, 2000, 5000, 0, 100);
   progress = constrain(progress, 0, 100);
   
   gfx->fillRect(140, 280, 200, 30, COLOR_BG);
@@ -2162,7 +2069,7 @@ void enterSetupMode() {
 
   // Start in AP mode
   WiFi.mode(WIFI_AP);
-  WiFi.softAP("CNC-Guardian-Setup");
+  WiFi.softAP("FluidDash-Setup");
   inAPMode = true;
 
   Serial.print("AP started. IP: ");
@@ -2179,7 +2086,7 @@ void showSplashScreen() {
   gfx->setTextColor(COLOR_HEADER);
   gfx->setTextSize(3);
   gfx->setCursor(80, 120);
-  gfx->println("CNC GUARDIAN");
+  gfx->println("FluidDash");
   gfx->setTextSize(2);
   gfx->setCursor(140, 160);
   gfx->println("v0.7");
