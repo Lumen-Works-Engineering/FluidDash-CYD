@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio run:*)",
+      "Bash(platformio run:*)",
+      "Bash(platformio pkg install:*)",
+      "Bash(pio pkg search:*)",
+      "Bash(powershell -Command \"Remove-Item -Recurse -Force ''c:\\Users\\john_sparks\\Documents\\PlatformIO\\Projects\\251021-085358-esp32dev\\.pio\\libdeps\\esp32dev\\GFX Library for Arduino''\")",
+      "Bash(powershell -Command:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
