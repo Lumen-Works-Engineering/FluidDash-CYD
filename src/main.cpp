@@ -11,6 +11,7 @@
 #include <Wire.h>
 #include <RTClib.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <WiFiManager.h>
 #if __has_include(<WebSocketsClient.h>)
 #include <WebSocketsClient.h>
