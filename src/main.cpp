@@ -44,6 +44,9 @@ public:
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
+#include <lvgl.h>
+#include "lvgl_driver.h"
+#include "ui/ui.h"
 
 // Hardware pins (unchanged)
 #define TFT_CS   15
@@ -295,6 +298,19 @@ void setup() {
     Serial.println("Display initialized OK");
     gfx->fillScreen(COLOR_BG);
     showSplashScreen();
+    delay(2000);  // Show splash briefly
+
+    // Initialize LVGL
+    Serial.println("Initializing LVGL...");
+    lvgl_driver_init();
+
+    // Initialize UI from SquareLine Studio
+    Serial.println("Loading UI...");
+    ui_init();
+
+    // Load the Monitor screen
+    lv_scr_load(ui_ScreenMonitor);
+    Serial.println("LVGL UI loaded");
   } else {
     Serial.println("Display initialization failed - continuing without display");
   }
@@ -407,6 +423,9 @@ void setup() {
 void loop() {
   // Feed the watchdog timer at the start of each loop iteration
   feedLoopWDT();
+
+  // CRITICAL: Call LVGL timer handler regularly (every 5-10ms)
+  lv_timer_handler();
 
   handleButton();
 
