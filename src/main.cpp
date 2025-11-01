@@ -1528,20 +1528,22 @@ void updateTempHistory() {
 // ========== Improved Display Functions ==========
 
 void drawScreen() {
-  gfx->fillScreen(COLOR_BG);
-
+  // LVGL version - just switch screens
+  // No need to draw manually, LVGL handles everything
   switch(currentMode) {
     case MODE_MONITOR:
-      drawMonitorMode();
+      lv_scr_load(ui_ScreenMonitor);
       break;
     case MODE_ALIGNMENT:
-      drawAlignmentMode();
+      // Note: Only ScreenMonitor exists from SquareLine Studio currently
+      // Fall back to Monitor until other screens are created
+      lv_scr_load(ui_ScreenMonitor);
       break;
     case MODE_GRAPH:
-      drawGraphMode();
+      lv_scr_load(ui_ScreenMonitor);
       break;
     case MODE_NETWORK:
-      drawNetworkMode();
+      lv_scr_load(ui_ScreenMonitor);
       break;
   }
 }
@@ -1589,6 +1591,7 @@ void drawMonitorMode() {
 }
 
 void updateDisplay() {
+  // LVGL version - update widget text only, LVGL handles rendering
   if (currentMode == MODE_MONITOR) {
     updateMonitorMode();
   } else if (currentMode == MODE_ALIGNMENT) {
@@ -1601,98 +1604,23 @@ void updateDisplay() {
 }
 
 void updateMonitorMode() {
+  // LVGL version - update only the labels that exist from SquareLine Studio
   DateTime now = rtc.now();
-  
-  // Update header time/date
-  gfx->setTextSize(1);
-  gfx->setTextColor(COLOR_TEXT);
-  gfx->fillRect(320, 6, 155, 14, COLOR_HEADER);
-  gfx->setCursor(320, 6);
+
+  // Update date/time label
   char timeStr[30];
-  sprintf(timeStr, "%s %02d  %02d:%02d:%02d", 
+  sprintf(timeStr, "%s %02d  %02d:%02d:%02d",
           getMonthName(now.month()), now.day(), now.hour(), now.minute(), now.second());
-  gfx->print(timeStr);
-  
-  // Update temps (compact)
-  gfx->setTextSize(2);
-  for (int i = 0; i < 4; i++) {
-    gfx->fillRect(40, 48 + i * 22, 190, 18, COLOR_BG);
-    
-    gfx->setTextColor(COLOR_VALUE);
-    gfx->setCursor(40, 50 + i * 22);
-    gfx->printf("%dC", (int)temperatures[i]);
-    
-    gfx->setTextColor(COLOR_WARN);
-    gfx->setCursor(100, 50 + i * 22);
-    gfx->printf("%dC", (int)peakTemps[i]);
+
+  // Check if the widget exists before updating (extern declared in ui files)
+  extern lv_obj_t * uic_label_datetime;
+  if (uic_label_datetime != NULL) {
+    lv_label_set_text(uic_label_datetime, timeStr);
   }
-  
-  // Fan & PSU status (one line)
-  gfx->fillRect(250, 155, 220, 18, COLOR_BG);
-  gfx->setTextSize(1);
-  gfx->setTextColor(COLOR_VALUE);
-  gfx->setCursor(250, 160);
-  gfx->printf("Fan:%d%%", fanSpeed);
-  
-  gfx->setCursor(320, 160);
-  if (psuVoltage < cfg.psu_alert_low || psuVoltage > cfg.psu_alert_high) {
-    gfx->setTextColor(COLOR_WARN);
-  } else {
-    gfx->setTextColor(COLOR_GOOD);
-  }
-  gfx->printf("PSU:%.1fV", psuVoltage);
-  
-  // Machine status - large
-  gfx->fillRect(10, 205, 220, 30, COLOR_BG);
-  gfx->setTextSize(3);
-  
-  if (machineState == "RUN") gfx->setTextColor(COLOR_GOOD);
-  else if (machineState == "ALARM") gfx->setTextColor(COLOR_WARN);
-  else if (machineState == "OFFLINE") gfx->setTextColor(COLOR_ORANGE);
-  else gfx->setTextColor(COLOR_VALUE);
-  
-  gfx->setCursor(80, 210);
-  gfx->print(machineState);
-  
-  // WORK coordinates - large, single line
-  gfx->fillRect(10, 245, 220, 35, COLOR_BG);
-  gfx->setTextSize(1);
-  gfx->setTextColor(COLOR_TEXT);
-  gfx->setCursor(10, 245);
-  gfx->print("WORK:");
-  
-  gfx->setTextSize(2);
-  gfx->setTextColor(COLOR_VALUE);
-  gfx->setCursor(10, 260);
-  
-  char coordFormat[20];
-  if (cfg.coord_decimal_places == 3) {
-    sprintf(coordFormat, "X:%%7.3f Y:%%7.3f");
-  } else {
-    sprintf(coordFormat, "X:%%6.2f Y:%%6.2f");
-  }
-  gfx->printf(coordFormat, wposX, wposY);
-  
-  gfx->setCursor(10, 285);
-  if (cfg.coord_decimal_places == 3) {
-    gfx->printf("Z:%7.3f", wposZ);
-  } else {
-    gfx->printf("Z:%6.2f", wposZ);
-  }
-  
-  // Machine coordinates - small, if enabled
-  if (cfg.show_machine_coords) {
-    gfx->fillRect(10, 305, 220, 10, COLOR_BG);
-    gfx->setTextSize(1);
-    gfx->setTextColor(COLOR_LINE);
-    gfx->setCursor(10, 305);
-    gfx->printf("Mach: X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
-  }
-  
-  // Temperature graph
-  if (cfg.show_temp_graph) {
-    drawTempGraph(250, 55, 220, 95);
-  }
+
+  // Note: Only the header with title and datetime exists from SquareLine Studio currently
+  // You need to design the rest of the Monitor screen in SquareLine Studio and re-export
+  // to get labels for temperatures, coordinates, status, etc.
 }
 
 void drawAlignmentMode() {

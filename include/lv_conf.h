@@ -8,7 +8,7 @@
 
 // Memory settings
 #define LV_MEM_CUSTOM 0
-#define LV_MEM_SIZE (48 * 1024U)  // 48KB - adjust based on available RAM
+#define LV_MEM_SIZE (32 * 1024U)  // 32KB - reduced to save RAM
 
 // Display settings - match your display
 #define LV_HOR_RES_MAX 480

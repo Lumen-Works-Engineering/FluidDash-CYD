@@ -7,19 +7,16 @@ extern Arduino_GFX *gfx;  // Reference to your existing display object
 
 // Display buffers - double buffering for smooth updates
 static lv_disp_draw_buf_t draw_buf;
-static lv_color_t buf1[480 * 20];  // Buffer for 20 lines
-static lv_color_t buf2[480 * 20];  // Second buffer for double buffering
+static lv_color_t buf1[480 * 10];  // Buffer for 10 lines (~9.6KB)
+static lv_color_t buf2[480 * 10];  // Second buffer for double buffering (~9.6KB)
 
 // Display flushing callback - this is called by LVGL to render
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
     uint32_t w = (area->x2 - area->x1 + 1);
     uint32_t h = (area->y2 - area->y1 + 1);
 
-    // Use your existing Arduino_GFX object
-    gfx->startWrite();
-    gfx->writeAddrWindow(area->x1, area->y1, w, h);
-    gfx->writePixels((uint16_t *)&color_p->full, w * h);
-    gfx->endWrite();
+    // Use Arduino_GFX draw16bitRGBBitmap method
+    gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)&color_p->full, w, h);
 
     // Tell LVGL we're done flushing
     lv_disp_flush_ready(disp);
@@ -31,7 +28,7 @@ void lvgl_driver_init() {
     lv_init();
 
     // Initialize the display buffer
-    lv_disp_draw_buf_init(&draw_buf, buf1, buf2, 480 * 20);
+    lv_disp_draw_buf_init(&draw_buf, buf1, buf2, 480 * 10);
 
     // Initialize and register the display driver
     static lv_disp_drv_t disp_drv;

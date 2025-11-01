@@ -19,13 +19,15 @@ void ui_ScreenMonitor_screen_init(void)
 {
     ui_ScreenMonitor = lv_obj_create(NULL);
     lv_obj_clear_flag(ui_ScreenMonitor, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_bg_color(ui_ScreenMonitor, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_ScreenMonitor, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_pane1header = lv_obj_create(ui_ScreenMonitor);
     lv_obj_set_width(ui_pane1header, 480);
     lv_obj_set_height(ui_pane1header, 25);
     lv_obj_set_align(ui_pane1header, LV_ALIGN_TOP_MID);
     lv_obj_clear_flag(ui_pane1header, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_pane1header, lv_color_hex(0x00001F), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(ui_pane1header, lv_color_hex(0x0707B5), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_pane1header, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Label1 = lv_label_create(ui_ScreenMonitor);
