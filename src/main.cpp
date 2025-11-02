@@ -308,8 +308,8 @@ void setup() {
     Serial.println("Loading UI...");
     ui_init();
 
-    // Load the Monitor screen
-    lv_scr_load(ui_ScreenMonitor);
+    // Load the Monitor screen (ui_Screen1Monitor is the new name from SquareLine Studio)
+    lv_scr_load(ui_Screen1Monitor);
     Serial.println("LVGL UI loaded");
   } else {
     Serial.println("Display initialization failed - continuing without display");
@@ -1532,18 +1532,18 @@ void drawScreen() {
   // No need to draw manually, LVGL handles everything
   switch(currentMode) {
     case MODE_MONITOR:
-      lv_scr_load(ui_ScreenMonitor);
+      lv_scr_load(ui_Screen1Monitor);
       break;
     case MODE_ALIGNMENT:
-      // Note: Only ScreenMonitor exists from SquareLine Studio currently
+      // Note: Only Screen1Monitor exists from SquareLine Studio currently
       // Fall back to Monitor until other screens are created
-      lv_scr_load(ui_ScreenMonitor);
+      lv_scr_load(ui_Screen1Monitor);
       break;
     case MODE_GRAPH:
-      lv_scr_load(ui_ScreenMonitor);
+      lv_scr_load(ui_Screen1Monitor);
       break;
     case MODE_NETWORK:
-      lv_scr_load(ui_ScreenMonitor);
+      lv_scr_load(ui_Screen1Monitor);
       break;
   }
 }
@@ -1604,23 +1604,114 @@ void updateDisplay() {
 }
 
 void updateMonitorMode() {
-  // LVGL version - update only the labels that exist from SquareLine Studio
+  // LVGL version - update all labels from SquareLine Studio ui_Screen1Monitor
   DateTime now = rtc.now();
+  char buffer[80];  // Increased size for longer coordinate strings
 
   // Update date/time label
-  char timeStr[30];
-  sprintf(timeStr, "%s %02d  %02d:%02d:%02d",
+  sprintf(buffer, "%s %02d  %02d:%02d:%02d",
           getMonthName(now.month()), now.day(), now.hour(), now.minute(), now.second());
-
-  // Check if the widget exists before updating (extern declared in ui files)
-  extern lv_obj_t * uic_label_datetime;
-  if (uic_label_datetime != NULL) {
-    lv_label_set_text(uic_label_datetime, timeStr);
+  extern lv_obj_t * ui_LabelDateTime;
+  if (ui_LabelDateTime != NULL) {
+    lv_label_set_text(ui_LabelDateTime, buffer);
   }
 
-  // Note: Only the header with title and datetime exists from SquareLine Studio currently
-  // You need to design the rest of the Monitor screen in SquareLine Studio and re-export
-  // to get labels for temperatures, coordinates, status, etc.
+  // Update temperature labels (X, YL, YR, Z)
+  extern lv_obj_t * ui_LabelXTemp;
+  extern lv_obj_t * ui_LabelYLTemp;
+  extern lv_obj_t * ui_LabelYRTemp;
+  extern lv_obj_t * ui_LabelZTemp;
+
+  if (ui_LabelXTemp != NULL) {
+    sprintf(buffer, "%d%s", (int)temperatures[0], cfg.use_fahrenheit ? "F" : "C");
+    lv_label_set_text(ui_LabelXTemp, buffer);
+  }
+  if (ui_LabelYLTemp != NULL) {
+    sprintf(buffer, "%d%s", (int)temperatures[1], cfg.use_fahrenheit ? "F" : "C");
+    lv_label_set_text(ui_LabelYLTemp, buffer);
+  }
+  if (ui_LabelYRTemp != NULL) {
+    sprintf(buffer, "%d%s", (int)temperatures[2], cfg.use_fahrenheit ? "F" : "C");
+    lv_label_set_text(ui_LabelYRTemp, buffer);
+  }
+  if (ui_LabelZTemp != NULL) {
+    sprintf(buffer, "%d%s", (int)temperatures[3], cfg.use_fahrenheit ? "F" : "C");
+    lv_label_set_text(ui_LabelZTemp, buffer);
+  }
+
+  // Update peak temperature labels
+  extern lv_obj_t * ui_LabelXTempPeak;
+  extern lv_obj_t * ui_LabelYLTempPeak;
+  extern lv_obj_t * ui_LabelYRTempPeak;
+  extern lv_obj_t * ui_LabelZTempPeak;
+
+  if (ui_LabelXTempPeak != NULL) {
+    sprintf(buffer, "%d%s", (int)peakTemperatures[0], cfg.use_fahrenheit ? "F" : "C");
+    lv_label_set_text(ui_LabelXTempPeak, buffer);
+  }
+  if (ui_LabelYLTempPeak != NULL) {
+    sprintf(buffer, "%d%s", (int)peakTemperatures[1], cfg.use_fahrenheit ? "F" : "C");
+    lv_label_set_text(ui_LabelYLTempPeak, buffer);
+  }
+  if (ui_LabelYRTempPeak != NULL) {
+    sprintf(buffer, "%d%s", (int)peakTemperatures[2], cfg.use_fahrenheit ? "F" : "C");
+    lv_label_set_text(ui_LabelYRTempPeak, buffer);
+  }
+  if (ui_LabelZTempPeak != NULL) {
+    sprintf(buffer, "%d%s", (int)peakTemperatures[3], cfg.use_fahrenheit ? "F" : "C");
+    lv_label_set_text(ui_LabelZTempPeak, buffer);
+  }
+
+  // Update Fan% label
+  extern lv_obj_t * ui_LabelFanPercent;
+  if (ui_LabelFanPercent != NULL) {
+    sprintf(buffer, "Fan%%: %d%% (%dRPM)", fanSpeed, fanRPM);
+    lv_label_set_text(ui_LabelFanPercent, buffer);
+  }
+
+  // Update PSU label
+  extern lv_obj_t * ui_LabelPSU;
+  if (ui_LabelPSU != NULL) {
+    sprintf(buffer, "PSU: %.1fV", psuVoltage);
+    lv_label_set_text(ui_LabelPSU, buffer);
+  }
+
+  // Update FluidNC Status label
+  extern lv_obj_t * ui_LabelFluidNCStatus;
+  if (ui_LabelFluidNCStatus != NULL) {
+    if (fluidncConnected) {
+      sprintf(buffer, "FluidNC: %s", machineState.c_str());
+    } else {
+      sprintf(buffer, "FluidNC: Disconnected");
+    }
+    lv_label_set_text(ui_LabelFluidNCStatus, buffer);
+  }
+
+  // Update WCS (Work Coordinate System) label
+  extern lv_obj_t * ui_LabelWCS;
+  if (ui_LabelWCS != NULL) {
+    if (cfg.coord_decimal_places == 3) {
+      sprintf(buffer, "WCS: X:%.3f Y:%.3f Z:%.3f", wposX, wposY, wposZ);
+    } else {
+      sprintf(buffer, "WCS: X:%.2f Y:%.2f Z:%.2f", wposX, wposY, wposZ);
+    }
+    lv_label_set_text(ui_LabelWCS, buffer);
+  }
+
+  // Update MCS (Machine Coordinate System) label
+  extern lv_obj_t * ui_LabelMCS;
+  if (ui_LabelMCS != NULL) {
+    if (cfg.coord_decimal_places == 3) {
+      sprintf(buffer, "MCS: X:%.3f Y:%.3f Z:%.3f", posX, posY, posZ);
+    } else {
+      sprintf(buffer, "MCS: X:%.2f Y:%.2f Z:%.2f", posX, posY, posZ);
+    }
+    lv_label_set_text(ui_LabelMCS, buffer);
+  }
+
+  // TODO: Update temperature history chart
+  // extern lv_obj_t * ui_ChartTempHistory;
+  // This will need chart series data updates in future
 }
 
 void drawAlignmentMode() {

@@ -44,7 +44,7 @@ void ui_Screen1Monitor_screen_init(void)
     ui_Screen1Monitor = lv_obj_create(NULL);
     lv_obj_clear_flag(ui_Screen1Monitor, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_Screen1Monitor, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_Screen1Monitor, lv_color_hex(0x0707B5), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(ui_Screen1Monitor, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_Screen1Monitor, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_pane1header = lv_obj_create(ui_Screen1Monitor);
