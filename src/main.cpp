@@ -1,5 +1,5 @@
 /*
- * Rename from CNC GUARDIAN v07 to FluidDash v01
+ * FluidDash v0.08
  * - WiFiManager for initial setup
  * - Preferences for persistent storage
  * - Web interface for all settings
