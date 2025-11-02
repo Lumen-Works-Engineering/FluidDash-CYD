@@ -289,6 +289,9 @@ bool isJobRunning = false;
 // WiFi AP mode flag
 bool inAPMode = false;
 
+// RTC availability flag
+bool rtcAvailable = false;
+
 // Timing
 unsigned long lastTachRead = 0;
 unsigned long lastDisplayUpdate = 0;
@@ -380,7 +383,16 @@ void setup() {
   // Initialize hardware BEFORE drawing (RTC needed for datetime display)
   feedLoopWDT();
   Wire.begin(RTC_SDA, RTC_SCL);  // CYD I2C pins: GPIO32=SDA, GPIO25=SCL
-  rtc.begin();
+
+  // Check if RTC is present (may not be connected on CYD)
+  if (!rtc.begin()) {
+    Serial.println("RTC not found - time display will show 'No RTC'");
+    rtcAvailable = false;
+  } else {
+    Serial.println("RTC initialized");
+    rtcAvailable = true;
+  }
+
   pinMode(BTN_MODE, INPUT_PULLUP);
 
   // RGB LED setup (common anode - LOW=on)
@@ -1401,15 +1413,18 @@ void fluidNCWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
       Serial.println("[FluidNC] Connected");
       fluidncConnected = true;
       machineState = "IDLE";
-      String cmd = "$Report/Interval=" + String(cfg.status_update_rate) + "\n";
-      if (!webSocket.sendTXT(cmd)) {
-        Serial.println("[FluidNC] Warning: Failed to send report interval command");
-      }
+      // Note: Modern FluidNC doesn't use $Report/Interval - relies on status requests via "?"
+      // String cmd = "$Report/Interval=" + String(cfg.status_update_rate) + "\n";
+      // if (!webSocket.sendTXT(cmd)) {
+      //   Serial.println("[FluidNC] Warning: Failed to send report interval command");
+      // }
       break;
     }
 
     case WStype_TEXT: {
       String msg = String((char*)payload);
+      Serial.print("[FluidNC RX] ");
+      Serial.println(msg);
       if (msg.startsWith("<")) {
         parseFluidNCStatus(msg);
       }
@@ -1481,42 +1496,26 @@ void sampleSensorsNonBlocking() {
   }
   lastAdcSample = millis();
 
-  // Take one sample from current sensor
-  uint8_t pins[] = {THERM_X, THERM_YL, THERM_YR, THERM_Z, PSU_VOLT};
-  adcSamples[adcCurrentSensor][adcSampleIndex] = analogRead(pins[adcCurrentSensor]);
+  // CYD NOTE: Only PSU voltage is ADC-based now (temperatures use DS18B20 OneWire)
+  // Take one sample from PSU voltage sensor only
+  adcSamples[4][adcSampleIndex] = analogRead(PSU_VOLT);  // Index 4 = PSU voltage
 
-  // Move to next sample or next sensor
+  // Move to next sample
   adcSampleIndex++;
   if (adcSampleIndex >= 10) {
     adcSampleIndex = 0;
-    adcCurrentSensor++;
-
-    if (adcCurrentSensor >= 5) {
-      adcCurrentSensor = 0;
-      adcReady = true;  // All sensors sampled
-    }
+    adcReady = true;  // PSU voltage sampling complete
   }
 }
 
 // Process averaged ADC readings (called when adcReady is true)
 void processAdcReadings() {
-  // Process thermistors
+  // CYD NOTE: Thermistor processing disabled - CYD uses DS18B20 OneWire sensors
+  // TODO: Implement DS18B20 OneWire temperature reading for CYD
+  // For now, set dummy temperature values to prevent display errors
   for (int sensor = 0; sensor < 4; sensor++) {
-    uint32_t sum = 0;
-    for (int i = 0; i < 10; i++) {
-      sum += adcSamples[sensor][i];
-    }
-    float adcValue = sum / 10.0;
-    temperatures[sensor] = calculateThermistorTemp(adcValue);
-
-    // Apply calibration offsets
-    float offsets[] = {cfg.temp_offset_x, cfg.temp_offset_yl, cfg.temp_offset_yr, cfg.temp_offset_z};
-    temperatures[sensor] += offsets[sensor];
-
-    // Update peaks
-    if (temperatures[sensor] > peakTemps[sensor]) {
-      peakTemps[sensor] = temperatures[sensor];
-    }
+    temperatures[sensor] = 25.0;  // Placeholder: 25C room temperature
+    peakTemps[sensor] = 25.0;
   }
 
   // Process PSU voltage
@@ -1623,10 +1622,14 @@ void drawMonitorMode() {
   gfx.print("FluidDash");
 
   // DateTime in header (right side)
-  DateTime now = rtc.now();
   char buffer[40];
-  sprintf(buffer, "%s %02d  %02d:%02d:%02d",
-          getMonthName(now.month()), now.day(), now.hour(), now.minute(), now.second());
+  if (rtcAvailable) {
+    DateTime now = rtc.now();
+    sprintf(buffer, "%s %02d  %02d:%02d:%02d",
+            getMonthName(now.month()), now.day(), now.hour(), now.minute(), now.second());
+  } else {
+    sprintf(buffer, "No RTC");
+  }
   gfx.setCursor(270, 6);
   gfx.print(buffer);
 
@@ -1747,9 +1750,13 @@ void updateMonitorMode() {
   char buffer[80];
 
   // Update DateTime in header
-  DateTime now = rtc.now();
-  sprintf(buffer, "%s %02d  %02d:%02d:%02d",
-          getMonthName(now.month()), now.day(), now.hour(), now.minute(), now.second());
+  if (rtcAvailable) {
+    DateTime now = rtc.now();
+    sprintf(buffer, "%s %02d  %02d:%02d:%02d",
+            getMonthName(now.month()), now.day(), now.hour(), now.minute(), now.second());
+  } else {
+    sprintf(buffer, "No RTC");
+  }
   gfx.fillRect(270, 0, 210, 25, COLOR_HEADER);
   gfx.setTextSize(2);
   gfx.setTextColor(COLOR_TEXT);
