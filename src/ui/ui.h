@@ -23,11 +23,13 @@ extern "C" {
 #endif
 
 #include "ui_helpers.h"
+#include "ui_comp.h"
+#include "ui_comp_hook.h"
 #include "ui_events.h"
 
 ///////////////////// SCREENS ////////////////////
 
-#include "ui_ScreenMonitor.h"
+#include "ui_Screen1Monitor.h"
 
 ///////////////////// VARIABLES ////////////////////
 
