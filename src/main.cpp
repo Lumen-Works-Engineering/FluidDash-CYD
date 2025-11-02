@@ -1646,19 +1646,19 @@ void updateMonitorMode() {
   extern lv_obj_t * ui_LabelZTempPeak;
 
   if (ui_LabelXTempPeak != NULL) {
-    sprintf(buffer, "%d%s", (int)peakTemperatures[0], cfg.use_fahrenheit ? "F" : "C");
+    sprintf(buffer, "%d%s", (int)peakTemps[0], cfg.use_fahrenheit ? "F" : "C");
     lv_label_set_text(ui_LabelXTempPeak, buffer);
   }
   if (ui_LabelYLTempPeak != NULL) {
-    sprintf(buffer, "%d%s", (int)peakTemperatures[1], cfg.use_fahrenheit ? "F" : "C");
+    sprintf(buffer, "%d%s", (int)peakTemps[1], cfg.use_fahrenheit ? "F" : "C");
     lv_label_set_text(ui_LabelYLTempPeak, buffer);
   }
   if (ui_LabelYRTempPeak != NULL) {
-    sprintf(buffer, "%d%s", (int)peakTemperatures[2], cfg.use_fahrenheit ? "F" : "C");
+    sprintf(buffer, "%d%s", (int)peakTemps[2], cfg.use_fahrenheit ? "F" : "C");
     lv_label_set_text(ui_LabelYRTempPeak, buffer);
   }
   if (ui_LabelZTempPeak != NULL) {
-    sprintf(buffer, "%d%s", (int)peakTemperatures[3], cfg.use_fahrenheit ? "F" : "C");
+    sprintf(buffer, "%d%s", (int)peakTemps[3], cfg.use_fahrenheit ? "F" : "C");
     lv_label_set_text(ui_LabelZTempPeak, buffer);
   }
 
