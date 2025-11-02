@@ -901,11 +901,18 @@ For new developers joining the project:
 - Custom themes in UI
 
 **SquareLine Studio Integration:**
-- Currently using manual Arduino_GFX drawing
-- LVGL framework integrated and ready
-- SquareLine Studio setup documented
-- UI export path configured: `src/ui/`
-- Migration to LVGL UI in progress (see integration guide)
+- ✅ LVGL 8.3.11 framework integrated
+- ✅ SquareLine Studio UI designed and exported
+- ✅ Monitor screen (`ui_Screen1Monitor`) implemented with:
+  - Header with title and real-time datetime
+  - Temperature panel with 4 channels (X, YL, YR, Z) and peak values
+  - Temperature history chart component (480x72px)
+  - FluidNC status panel with WCS/MCS coordinates
+  - Fan% and PSU voltage displays
+- ✅ Helper functions created to update all LVGL labels
+- ⏳ Chart data population (TODO)
+- ⏳ Additional screens for Alignment, Graph, Network modes
+- See `SquareLine_Studio_Integration_Guide.md` for details
 
 ---
 
@@ -934,7 +941,57 @@ When working on this project:
 
 ---
 
-**Last Updated:** 2025-10-31  
-**Project Version:** v0.7  
-**Author:** FluidDash Development Team  
+**Last Updated:** 2025-11-01
+**Project Version:** v0.8 (LVGL Migration)
+**Author:** FluidDash Development Team
 **Status:** Active Development
+
+---
+
+## Recent Changes (v0.8)
+
+**2025-11-01 - LVGL/SquareLine Studio Integration:**
+
+1. **UI Framework Migration**
+   - Migrated from direct Arduino_GFX drawing to LVGL 8.3.11
+   - Integrated SquareLine Studio for visual UI design
+   - Created comprehensive Monitor screen layout
+
+2. **Screen Implementation** (`ui_Screen1Monitor`)
+   - Header panel (480x25): Title + real-time datetime
+   - Temperature panel (180x125): 4-channel monitoring with peak tracking
+   - Graph panel (300x125): Temperature history chart component
+   - FluidNC panel (480x170): Status, WCS, and MCS coordinates display
+   - Fan/PSU status line
+
+3. **Code Updates**
+   - Updated `main.cpp` to use `ui_Screen1Monitor` instead of old screen refs
+   - Created comprehensive `updateMonitorMode()` with all label updates:
+     - DateTime, temperatures (X/YL/YR/Z), peak temps
+     - Fan speed/RPM, PSU voltage
+     - FluidNC connection status
+     - Work and Machine coordinate systems
+   - Fixed screen background color (black instead of blue)
+   - Enabled `lv_font_montserrat_10` in `lv_conf.h`
+
+4. **Memory Optimizations**
+   - Display buffers: 480x10 lines (reduced from 20)
+   - LVGL memory pool: 32KB (reduced from 48KB)
+   - Total RAM saved: ~35KB
+
+5. **Files Modified**
+   - `src/main.cpp` - Screen references and update functions
+   - `src/ui/ui_Screen1Monitor.c` - Background color fix
+   - `include/lv_conf.h` - Font enable
+   - `platformio.ini` - LVGL library added
+
+6. **Known Issues Resolved**
+   - Fixed variable name mismatch (`peakTemps` vs `peakTemperatures`)
+   - Fixed missing font compilation error
+   - Removed old Arduino_GFX overlay drawing code
+
+**Next Steps:**
+- Test new UI on hardware
+- Implement chart data population
+- Create additional screens (Alignment, Graph, Network)
+- Consider LovyanGFX migration for FluidNC ecosystem compatibility
