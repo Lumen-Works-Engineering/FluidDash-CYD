@@ -1,5 +1,6 @@
 /*
- * FluidDash v0.08
+ * FluidDash v0.09 - CYD Edition
+ * Configured for ESP32-2432S028 (CYD 3.5" or 4.0" modules)
  * - WiFiManager for initial setup
  * - Preferences for persistent storage
  * - Web interface for all settings
@@ -45,20 +46,36 @@ public:
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 
-// Hardware pins (unchanged)
-#define TFT_CS   15
-#define TFT_DC   2
-#define TFT_RST  4
-#define TFT_MOSI 23
-#define TFT_SCK  18
-#define FAN_PWM   25
-#define FAN_TACH  26
-#define THERM_X   32
-#define THERM_YL  33
-#define THERM_YR  34
-#define THERM_Z   35
-#define PSU_VOLT  36
-#define BTN_MODE  14
+// ========== CYD HARDWARE PIN CONFIGURATION ==========
+// Compatible with E32R35T (3.5") and E32R40T (4.0")
+// Based on LCD Wiki official documentation - see FLUIDDASH_HARDWARE_REFERENCE.md
+
+// Display & Touch (Pre-wired onboard - HSPI bus)
+#define TFT_CS      15    // LCD chip select
+#define TFT_DC      2     // Data/command
+#define TFT_RST     -1    // Shared with EN button (hardware reset)
+#define TFT_MOSI    13    // SPI MOSI (HSPI)
+#define TFT_SCK     14    // SPI clock (HSPI)
+#define TFT_MISO    12    // SPI MISO (HSPI)
+#define TFT_BL      27    // Backlight control
+#define TOUCH_CS    33    // Touch chip select
+#define TOUCH_IRQ   36    // Touch interrupt
+
+// FluidDash Sensors (External connections via connectors)
+#define ONE_WIRE_BUS_1    21    // Internal motor drivers (P3 SPI_CS pin)
+#define RTC_SDA           32    // I2C connector (P4)
+#define RTC_SCL           25    // I2C connector (P4)
+#define FAN_PWM           4     // Fan PWM control (repurpose AUDIO_EN)
+#define FAN_TACH          35    // Fan tachometer (P2 expansion pin)
+#define PSU_VOLT          34    // PSU voltage monitor (repurpose BAT_ADC)
+
+// RGB Status LED (Pre-wired onboard - common anode, LOW=on)
+#define LED_RED     22
+#define LED_GREEN   16
+#define LED_BLUE    17
+
+// Mode button (use GPIO0 - BOOT button)
+#define BTN_MODE    0
 
 // Constants
 #define PWM_FREQ     25000
@@ -171,13 +188,14 @@ class LGFX : public lgfx::LGFX_Device
 {
   lgfx::Panel_ST7796 _panel_instance;
   lgfx::Bus_SPI _bus_instance;
+  lgfx::Light_PWM _light_instance;
 
 public:
   LGFX(void)
   {
     {
       auto cfg = _bus_instance.config();
-      cfg.spi_host = VSPI_HOST;
+      cfg.spi_host = HSPI_HOST;      // CRITICAL: CYD uses HSPI not VSPI!
       cfg.spi_mode = 0;
       cfg.freq_write = 40000000;
       cfg.freq_read  = 16000000;
@@ -207,11 +225,21 @@ public:
       cfg.dummy_read_pixel = 8;
       cfg.dummy_read_bits  = 1;
       cfg.readable         = true;
-      cfg.invert           = false;
-      cfg.rgb_order        = false;
+      cfg.invert           = true;        // CYD needs inversion
+      cfg.rgb_order        = true;        // CYD uses BGR
       cfg.dlen_16bit       = false;
-      cfg.bus_shared       = false;
+      cfg.bus_shared       = true;        // Shared with touch
       _panel_instance.config(cfg);
+    }
+
+    {
+      auto cfg = _light_instance.config();
+      cfg.pin_bl = TFT_BL;      // GPIO27
+      cfg.invert = false;
+      cfg.freq   = 44100;
+      cfg.pwm_channel = 1;
+      _light_instance.config(cfg);
+      _panel_instance.setLight(&_light_instance);
     }
 
     setPanel(&_panel_instance);
@@ -351,9 +379,17 @@ void setup() {
 
   // Initialize hardware BEFORE drawing (RTC needed for datetime display)
   feedLoopWDT();
-  Wire.begin(21, 22);
+  Wire.begin(RTC_SDA, RTC_SCL);  // CYD I2C pins: GPIO32=SDA, GPIO25=SCL
   rtc.begin();
   pinMode(BTN_MODE, INPUT_PULLUP);
+
+  // RGB LED setup (common anode - LOW=on)
+  pinMode(LED_RED, OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+  pinMode(LED_BLUE, OUTPUT);
+  digitalWrite(LED_RED, HIGH);    // OFF
+  digitalWrite(LED_GREEN, HIGH);  // OFF
+  digitalWrite(LED_BLUE, HIGH);   // OFF
 
   // Configure ADC & PWM
   analogSetWidth(12);
