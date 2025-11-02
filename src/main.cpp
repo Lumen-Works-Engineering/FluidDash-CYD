@@ -7,7 +7,7 @@
  */
 
 #include <Arduino.h>
-#include <Arduino_GFX_Library.h>
+#include <LovyanGFX.hpp>
 #include <Wire.h>
 #include <RTClib.h>
 #include <WiFi.h>
@@ -44,9 +44,6 @@ public:
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
-#include <lvgl.h>
-#include "lvgl_driver.h"
-#include "ui/ui.h"
 
 // Hardware pins (unchanged)
 #define TFT_CS   15
@@ -169,9 +166,59 @@ void initDefaultConfig() {
   cfg.status_update_rate = 200;
 }
 
-// Objects
-Arduino_DataBus *bus = new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, -1);
-Arduino_GFX *gfx = new Arduino_ST7796(bus, TFT_RST, 1, false);  // rotation: 0=0°, 1=90°, 2=180°, 3=270°
+// LovyanGFX Display Configuration for ST7796 480x320
+class LGFX : public lgfx::LGFX_Device
+{
+  lgfx::Panel_ST7796 _panel_instance;
+  lgfx::Bus_SPI _bus_instance;
+
+public:
+  LGFX(void)
+  {
+    {
+      auto cfg = _bus_instance.config();
+      cfg.spi_host = VSPI_HOST;
+      cfg.spi_mode = 0;
+      cfg.freq_write = 40000000;
+      cfg.freq_read  = 16000000;
+      cfg.spi_3wire  = false;
+      cfg.use_lock   = true;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;
+      cfg.pin_sclk = TFT_SCK;
+      cfg.pin_mosi = TFT_MOSI;
+      cfg.pin_miso = -1;
+      cfg.pin_dc   = TFT_DC;
+      _bus_instance.config(cfg);
+      _panel_instance.setBus(&_bus_instance);
+    }
+
+    {
+      auto cfg = _panel_instance.config();
+      cfg.pin_cs           = TFT_CS;
+      cfg.pin_rst          = TFT_RST;
+      cfg.pin_busy         = -1;
+      cfg.memory_width     = 320;
+      cfg.memory_height    = 480;
+      cfg.panel_width      = 320;
+      cfg.panel_height     = 480;
+      cfg.offset_x         = 0;
+      cfg.offset_y         = 0;
+      cfg.offset_rotation  = 0;
+      cfg.dummy_read_pixel = 8;
+      cfg.dummy_read_bits  = 1;
+      cfg.readable         = true;
+      cfg.invert           = false;
+      cfg.rgb_order        = false;
+      cfg.dlen_16bit       = false;
+      cfg.bus_shared       = false;
+      _panel_instance.config(cfg);
+    }
+
+    setPanel(&_panel_instance);
+  }
+};
+
+LGFX gfx;
 RTC_DS3231 rtc;
 WebSocketsClient webSocket;
 Preferences prefs;
@@ -294,26 +341,16 @@ void setup() {
   // Initialize display (feed watchdog before long operation)
   feedLoopWDT();
   Serial.println("Initializing display...");
-  if (gfx->begin()) {
-    Serial.println("Display initialized OK");
-    gfx->fillScreen(COLOR_BG);
-    showSplashScreen();
-    delay(2000);  // Show splash briefly
+  gfx.init();
+  gfx.setRotation(1);  // 90° rotation for landscape mode (480x320)
+  gfx.setBrightness(255);
+  Serial.println("Display initialized OK");
+  gfx.fillScreen(COLOR_BG);
+  showSplashScreen();
+  delay(2000);  // Show splash briefly
 
-    // Initialize LVGL
-    Serial.println("Initializing LVGL...");
-    lvgl_driver_init();
-
-    // Initialize UI from SquareLine Studio
-    Serial.println("Loading UI...");
-    ui_init();
-
-    // Load the Monitor screen (ui_Screen1Monitor is the new name from SquareLine Studio)
-    lv_scr_load(ui_Screen1Monitor);
-    Serial.println("LVGL UI loaded");
-  } else {
-    Serial.println("Display initialization failed - continuing without display");
-  }
+  // Draw initial screen
+  drawScreen();
   feedLoopWDT();
 
   // Initialize hardware
@@ -423,9 +460,6 @@ void setup() {
 void loop() {
   // Feed the watchdog timer at the start of each loop iteration
   feedLoopWDT();
-
-  // CRITICAL: Call LVGL timer handler regularly (every 5-10ms)
-  lv_timer_handler();
 
   handleButton();
 
@@ -1528,56 +1562,124 @@ void updateTempHistory() {
 // ========== Improved Display Functions ==========
 
 void drawScreen() {
-  // LVGL version - just switch screens
-  // No need to draw manually, LVGL handles everything
+  // LovyanGFX version - draw each mode's initial screen
   switch(currentMode) {
     case MODE_MONITOR:
-      lv_scr_load(ui_Screen1Monitor);
+      drawMonitorMode();
       break;
     case MODE_ALIGNMENT:
-      // Note: Only Screen1Monitor exists from SquareLine Studio currently
-      // Fall back to Monitor until other screens are created
-      lv_scr_load(ui_Screen1Monitor);
+      drawAlignmentMode();
       break;
     case MODE_GRAPH:
-      lv_scr_load(ui_Screen1Monitor);
+      drawGraphMode();
       break;
     case MODE_NETWORK:
-      lv_scr_load(ui_Screen1Monitor);
+      drawNetworkMode();
       break;
   }
 }
 
 void drawMonitorMode() {
+  gfx.fillScreen(COLOR_BG);
+
   // Header
-  gfx->fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
-  gfx->setTextColor(COLOR_TEXT);
-  gfx->setTextSize(2);
-  gfx->setCursor(10, 6);
-  gfx->print("FluidDash");
-  
+  gfx.fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setTextSize(2);
+  gfx.setCursor(10, 6);
+  gfx.print("FluidDash");
+
+  // DateTime in header (right side)
+  DateTime now = rtc.now();
+  char buffer[40];
+  sprintf(buffer, "%s %02d  %02d:%02d:%02d",
+          getMonthName(now.month()), now.day(), now.hour(), now.minute(), now.second());
+  gfx.setCursor(270, 6);
+  gfx.print(buffer);
+
   // Dividers
-  gfx->drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
-  gfx->drawFastHLine(0, 175, SCREEN_WIDTH, COLOR_LINE);
-  gfx->drawFastVLine(240, 25, 150, COLOR_LINE);
-  
-  // Labels
-  gfx->setTextSize(1);
-  gfx->setCursor(10, 30);
-  gfx->print("DRIVERS:");
-  
+  gfx.drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
+  gfx.drawFastHLine(0, 175, SCREEN_WIDTH, COLOR_LINE);
+  gfx.drawFastVLine(240, 25, 150, COLOR_LINE);
+
+  // Left section - Driver temperatures
+  gfx.setTextSize(1);
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setCursor(10, 30);
+  gfx.print("DRIVERS:");
+
   const char* labels[] = {"X:", "YL:", "YR:", "Z:"};
   for (int i = 0; i < 4; i++) {
-    gfx->setCursor(10, 50 + i * 22);
-    gfx->print(labels[i]);
+    gfx.setCursor(10, 50 + i * 30);
+    gfx.setTextColor(COLOR_TEXT);
+    gfx.print(labels[i]);
+
+    // Current temp
+    gfx.setTextSize(2);
+    gfx.setTextColor(temperatures[i] > cfg.temp_threshold_high ? COLOR_WARN : COLOR_VALUE);
+    gfx.setCursor(50, 47 + i * 30);
+    sprintf(buffer, "%d%s", (int)temperatures[i], cfg.use_fahrenheit ? "F" : "C");
+    gfx.print(buffer);
+
+    // Peak temp (smaller, to the right)
+    gfx.setTextSize(1);
+    gfx.setTextColor(COLOR_LINE);
+    gfx.setCursor(140, 52 + i * 30);
+    sprintf(buffer, "pk:%d%s", (int)peakTemps[i], cfg.use_fahrenheit ? "F" : "C");
+    gfx.print(buffer);
+
+    gfx.setTextSize(1);
   }
-  
-  gfx->setCursor(10, 185);
-  gfx->print("STATUS:");
-  
-  gfx->setCursor(250, 30);
-  gfx->print("TEMP HISTORY");
-  
+
+  // Status section
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setCursor(10, 185);
+  gfx.print("STATUS:");
+
+  gfx.setCursor(10, 200);
+  gfx.setTextColor(COLOR_LINE);
+  sprintf(buffer, "Fan: %d%% (%dRPM)", fanSpeed, fanRPM);
+  gfx.print(buffer);
+
+  gfx.setCursor(10, 215);
+  sprintf(buffer, "PSU: %.1fV", psuVoltage);
+  gfx.print(buffer);
+
+  gfx.setCursor(10, 230);
+  if (fluidncConnected) {
+    if (machineState == "RUN") gfx.setTextColor(COLOR_GOOD);
+    else if (machineState == "ALARM") gfx.setTextColor(COLOR_WARN);
+    else gfx.setTextColor(COLOR_VALUE);
+    sprintf(buffer, "FluidNC: %s", machineState.c_str());
+  } else {
+    gfx.setTextColor(COLOR_WARN);
+    sprintf(buffer, "FluidNC: Disconnected");
+  }
+  gfx.print(buffer);
+
+  // Coordinates
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setCursor(10, 250);
+  if (cfg.coord_decimal_places == 3) {
+    sprintf(buffer, "WCS: X:%.3f Y:%.3f Z:%.3f", wposX, wposY, wposZ);
+  } else {
+    sprintf(buffer, "WCS: X:%.2f Y:%.2f Z:%.2f", wposX, wposY, wposZ);
+  }
+  gfx.print(buffer);
+
+  gfx.setCursor(10, 265);
+  if (cfg.coord_decimal_places == 3) {
+    sprintf(buffer, "MCS: X:%.3f Y:%.3f Z:%.3f", posX, posY, posZ);
+  } else {
+    sprintf(buffer, "MCS: X:%.2f Y:%.2f Z:%.2f", posX, posY, posZ);
+  }
+  gfx.print(buffer);
+
+  // Right section - Temperature graph
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setCursor(250, 30);
+  gfx.print("TEMP HISTORY");
+
   if (cfg.show_temp_graph) {
     char graphLabel[40];
     if (cfg.graph_timespan_seconds >= 60) {
@@ -1585,13 +1687,17 @@ void drawMonitorMode() {
     } else {
       sprintf(graphLabel, "(%d sec)", cfg.graph_timespan_seconds);
     }
-    gfx->setCursor(250, 40);
-    gfx->print(graphLabel);
+    gfx.setCursor(250, 40);
+    gfx.setTextColor(COLOR_LINE);
+    gfx.print(graphLabel);
+
+    // Draw the temperature history graph
+    drawTempGraph(250, 55, 220, 110);
   }
 }
 
 void updateDisplay() {
-  // LVGL version - update widget text only, LVGL handles rendering
+  // LovyanGFX version - update dynamic parts of each display mode
   if (currentMode == MODE_MONITOR) {
     updateMonitorMode();
   } else if (currentMode == MODE_ALIGNMENT) {
@@ -1604,137 +1710,118 @@ void updateDisplay() {
 }
 
 void updateMonitorMode() {
-  // LVGL version - update all labels from SquareLine Studio ui_Screen1Monitor
-  DateTime now = rtc.now();
-  char buffer[80];  // Increased size for longer coordinate strings
+  // LovyanGFX version - only update dynamic parts (clear area, then redraw)
+  char buffer[80];
 
-  // Update date/time label
+  // Update DateTime in header
+  DateTime now = rtc.now();
   sprintf(buffer, "%s %02d  %02d:%02d:%02d",
           getMonthName(now.month()), now.day(), now.hour(), now.minute(), now.second());
-  extern lv_obj_t * ui_LabelDateTime;
-  if (ui_LabelDateTime != NULL) {
-    lv_label_set_text(ui_LabelDateTime, buffer);
+  gfx.fillRect(270, 0, 210, 25, COLOR_HEADER);
+  gfx.setTextSize(2);
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setCursor(270, 6);
+  gfx.print(buffer);
+
+  // Update temperature values and peaks
+  for (int i = 0; i < 4; i++) {
+    // Clear the temperature display area for this driver
+    gfx.fillRect(50, 47 + i * 30, 180, 20, COLOR_BG);
+
+    // Current temp
+    gfx.setTextSize(2);
+    gfx.setTextColor(temperatures[i] > cfg.temp_threshold_high ? COLOR_WARN : COLOR_VALUE);
+    gfx.setCursor(50, 47 + i * 30);
+    sprintf(buffer, "%d%s", (int)temperatures[i], cfg.use_fahrenheit ? "F" : "C");
+    gfx.print(buffer);
+
+    // Peak temp
+    gfx.setTextSize(1);
+    gfx.setTextColor(COLOR_LINE);
+    gfx.setCursor(140, 52 + i * 30);
+    sprintf(buffer, "pk:%d%s", (int)peakTemps[i], cfg.use_fahrenheit ? "F" : "C");
+    gfx.print(buffer);
   }
 
-  // Update temperature labels (X, YL, YR, Z)
-  extern lv_obj_t * ui_LabelXTemp;
-  extern lv_obj_t * ui_LabelYLTemp;
-  extern lv_obj_t * ui_LabelYRTemp;
-  extern lv_obj_t * ui_LabelZTemp;
+  // Update status section
+  gfx.setTextSize(1);
 
-  if (ui_LabelXTemp != NULL) {
-    sprintf(buffer, "%d%s", (int)temperatures[0], cfg.use_fahrenheit ? "F" : "C");
-    lv_label_set_text(ui_LabelXTemp, buffer);
-  }
-  if (ui_LabelYLTemp != NULL) {
-    sprintf(buffer, "%d%s", (int)temperatures[1], cfg.use_fahrenheit ? "F" : "C");
-    lv_label_set_text(ui_LabelYLTemp, buffer);
-  }
-  if (ui_LabelYRTemp != NULL) {
-    sprintf(buffer, "%d%s", (int)temperatures[2], cfg.use_fahrenheit ? "F" : "C");
-    lv_label_set_text(ui_LabelYRTemp, buffer);
-  }
-  if (ui_LabelZTemp != NULL) {
-    sprintf(buffer, "%d%s", (int)temperatures[3], cfg.use_fahrenheit ? "F" : "C");
-    lv_label_set_text(ui_LabelZTemp, buffer);
-  }
+  // Fan
+  gfx.fillRect(10, 200, 220, 10, COLOR_BG);
+  gfx.setTextColor(COLOR_LINE);
+  gfx.setCursor(10, 200);
+  sprintf(buffer, "Fan: %d%% (%dRPM)", fanSpeed, fanRPM);
+  gfx.print(buffer);
 
-  // Update peak temperature labels
-  extern lv_obj_t * ui_LabelXTempPeak;
-  extern lv_obj_t * ui_LabelYLTempPeak;
-  extern lv_obj_t * ui_LabelYRTempPeak;
-  extern lv_obj_t * ui_LabelZTempPeak;
+  // PSU
+  gfx.fillRect(10, 215, 220, 10, COLOR_BG);
+  gfx.setCursor(10, 215);
+  gfx.setTextColor(COLOR_LINE);
+  sprintf(buffer, "PSU: %.1fV", psuVoltage);
+  gfx.print(buffer);
 
-  if (ui_LabelXTempPeak != NULL) {
-    sprintf(buffer, "%d%s", (int)peakTemps[0], cfg.use_fahrenheit ? "F" : "C");
-    lv_label_set_text(ui_LabelXTempPeak, buffer);
+  // FluidNC Status
+  gfx.fillRect(10, 230, 220, 10, COLOR_BG);
+  gfx.setCursor(10, 230);
+  if (fluidncConnected) {
+    if (machineState == "RUN") gfx.setTextColor(COLOR_GOOD);
+    else if (machineState == "ALARM") gfx.setTextColor(COLOR_WARN);
+    else gfx.setTextColor(COLOR_VALUE);
+    sprintf(buffer, "FluidNC: %s", machineState.c_str());
+  } else {
+    gfx.setTextColor(COLOR_WARN);
+    sprintf(buffer, "FluidNC: Disconnected");
   }
-  if (ui_LabelYLTempPeak != NULL) {
-    sprintf(buffer, "%d%s", (int)peakTemps[1], cfg.use_fahrenheit ? "F" : "C");
-    lv_label_set_text(ui_LabelYLTempPeak, buffer);
-  }
-  if (ui_LabelYRTempPeak != NULL) {
-    sprintf(buffer, "%d%s", (int)peakTemps[2], cfg.use_fahrenheit ? "F" : "C");
-    lv_label_set_text(ui_LabelYRTempPeak, buffer);
-  }
-  if (ui_LabelZTempPeak != NULL) {
-    sprintf(buffer, "%d%s", (int)peakTemps[3], cfg.use_fahrenheit ? "F" : "C");
-    lv_label_set_text(ui_LabelZTempPeak, buffer);
-  }
+  gfx.print(buffer);
 
-  // Update Fan% label
-  extern lv_obj_t * ui_LabelFanPercent;
-  if (ui_LabelFanPercent != NULL) {
-    sprintf(buffer, "Fan%%: %d%% (%dRPM)", fanSpeed, fanRPM);
-    lv_label_set_text(ui_LabelFanPercent, buffer);
+  // WCS Coordinates
+  gfx.fillRect(10, 250, 220, 10, COLOR_BG);
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setCursor(10, 250);
+  if (cfg.coord_decimal_places == 3) {
+    sprintf(buffer, "WCS: X:%.3f Y:%.3f Z:%.3f", wposX, wposY, wposZ);
+  } else {
+    sprintf(buffer, "WCS: X:%.2f Y:%.2f Z:%.2f", wposX, wposY, wposZ);
   }
+  gfx.print(buffer);
 
-  // Update PSU label
-  extern lv_obj_t * ui_LabelPSU;
-  if (ui_LabelPSU != NULL) {
-    sprintf(buffer, "PSU: %.1fV", psuVoltage);
-    lv_label_set_text(ui_LabelPSU, buffer);
+  // MCS Coordinates
+  gfx.fillRect(10, 265, 220, 10, COLOR_BG);
+  gfx.setCursor(10, 265);
+  if (cfg.coord_decimal_places == 3) {
+    sprintf(buffer, "MCS: X:%.3f Y:%.3f Z:%.3f", posX, posY, posZ);
+  } else {
+    sprintf(buffer, "MCS: X:%.2f Y:%.2f Z:%.2f", posX, posY, posZ);
   }
+  gfx.print(buffer);
 
-  // Update FluidNC Status label
-  extern lv_obj_t * ui_LabelFluidNCStatus;
-  if (ui_LabelFluidNCStatus != NULL) {
-    if (fluidncConnected) {
-      sprintf(buffer, "FluidNC: %s", machineState.c_str());
-    } else {
-      sprintf(buffer, "FluidNC: Disconnected");
-    }
-    lv_label_set_text(ui_LabelFluidNCStatus, buffer);
+  // Update temperature graph (if enabled)
+  if (cfg.show_temp_graph) {
+    drawTempGraph(250, 55, 220, 110);
   }
-
-  // Update WCS (Work Coordinate System) label
-  extern lv_obj_t * ui_LabelWCS;
-  if (ui_LabelWCS != NULL) {
-    if (cfg.coord_decimal_places == 3) {
-      sprintf(buffer, "WCS: X:%.3f Y:%.3f Z:%.3f", wposX, wposY, wposZ);
-    } else {
-      sprintf(buffer, "WCS: X:%.2f Y:%.2f Z:%.2f", wposX, wposY, wposZ);
-    }
-    lv_label_set_text(ui_LabelWCS, buffer);
-  }
-
-  // Update MCS (Machine Coordinate System) label
-  extern lv_obj_t * ui_LabelMCS;
-  if (ui_LabelMCS != NULL) {
-    if (cfg.coord_decimal_places == 3) {
-      sprintf(buffer, "MCS: X:%.3f Y:%.3f Z:%.3f", posX, posY, posZ);
-    } else {
-      sprintf(buffer, "MCS: X:%.2f Y:%.2f Z:%.2f", posX, posY, posZ);
-    }
-    lv_label_set_text(ui_LabelMCS, buffer);
-  }
-
-  // TODO: Update temperature history chart
-  // extern lv_obj_t * ui_ChartTempHistory;
-  // This will need chart series data updates in future
 }
 
 void drawAlignmentMode() {
-  gfx->fillScreen(COLOR_BG);
+  gfx.fillScreen(COLOR_BG);
   
   // Header
-  gfx->fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
-  gfx->setTextColor(COLOR_TEXT);
-  gfx->setTextSize(2);
-  gfx->setCursor(140, 6);
-  gfx->print("ALIGNMENT MODE");
+  gfx.fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setTextSize(2);
+  gfx.setCursor(140, 6);
+  gfx.print("ALIGNMENT MODE");
   
-  gfx->drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
+  gfx.drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
   
   // Title
-  gfx->setTextSize(2);
-  gfx->setTextColor(COLOR_HEADER);
-  gfx->setCursor(150, 40);
-  gfx->print("WORK POSITION");
+  gfx.setTextSize(2);
+  gfx.setTextColor(COLOR_HEADER);
+  gfx.setCursor(150, 40);
+  gfx.print("WORK POSITION");
   
   // Extra-large coordinates
-  gfx->setTextSize(5);
-  gfx->setTextColor(COLOR_VALUE);
+  gfx.setTextSize(5);
+  gfx.setTextColor(COLOR_VALUE);
   
   char coordFormat[20];
   if (cfg.coord_decimal_places == 3) {
@@ -1743,43 +1830,43 @@ void drawAlignmentMode() {
     strcpy(coordFormat, "X:%8.2f");
   }
   
-  gfx->setCursor(40, 90);
-  gfx->printf(coordFormat, wposX);
+  gfx.setCursor(40, 90);
+  gfx.printf(coordFormat, wposX);
   
   coordFormat[0] = 'Y';
-  gfx->setCursor(40, 145);
-  gfx->printf(coordFormat, wposY);
+  gfx.setCursor(40, 145);
+  gfx.printf(coordFormat, wposY);
   
   coordFormat[0] = 'Z';
-  gfx->setCursor(40, 200);
-  gfx->printf(coordFormat, wposZ);
+  gfx.setCursor(40, 200);
+  gfx.printf(coordFormat, wposZ);
   
   // Small info footer
-  gfx->setTextSize(1);
-  gfx->setTextColor(COLOR_LINE);
-  gfx->setCursor(10, 270);
-  gfx->printf("Machine: X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
+  gfx.setTextSize(1);
+  gfx.setTextColor(COLOR_LINE);
+  gfx.setCursor(10, 270);
+  gfx.printf("Machine: X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
   
-  gfx->setCursor(10, 285);
-  if (machineState == "RUN") gfx->setTextColor(COLOR_GOOD);
-  else if (machineState == "ALARM") gfx->setTextColor(COLOR_WARN);
-  else gfx->setTextColor(COLOR_VALUE);
-  gfx->printf("Status: %s", machineState.c_str());
+  gfx.setCursor(10, 285);
+  if (machineState == "RUN") gfx.setTextColor(COLOR_GOOD);
+  else if (machineState == "ALARM") gfx.setTextColor(COLOR_WARN);
+  else gfx.setTextColor(COLOR_VALUE);
+  gfx.printf("Status: %s", machineState.c_str());
   
   float maxTemp = temperatures[0];
   for (int i = 1; i < 4; i++) {
     if (temperatures[i] > maxTemp) maxTemp = temperatures[i];
   }
   
-  gfx->setTextColor(maxTemp > cfg.temp_threshold_high ? COLOR_WARN : COLOR_LINE);
-  gfx->setCursor(10, 300);
-  gfx->printf("Temps:%.0fC  Fan:%d%%  PSU:%.1fV", maxTemp, fanSpeed, psuVoltage);
+  gfx.setTextColor(maxTemp > cfg.temp_threshold_high ? COLOR_WARN : COLOR_LINE);
+  gfx.setCursor(10, 300);
+  gfx.printf("Temps:%.0fC  Fan:%d%%  PSU:%.1fV", maxTemp, fanSpeed, psuVoltage);
 }
 
 void updateAlignmentMode() {
   // Update large coordinates
-  gfx->setTextSize(5);
-  gfx->setTextColor(COLOR_VALUE);
+  gfx.setTextSize(5);
+  gfx.setTextColor(COLOR_VALUE);
   
   char coordFormat[20];
   if (cfg.coord_decimal_places == 3) {
@@ -1788,51 +1875,51 @@ void updateAlignmentMode() {
     strcpy(coordFormat, "%8.2f");
   }
   
-  gfx->fillRect(150, 90, 320, 38, COLOR_BG);
-  gfx->setCursor(150, 90);
-  gfx->printf(coordFormat, wposX);
+  gfx.fillRect(150, 90, 320, 38, COLOR_BG);
+  gfx.setCursor(150, 90);
+  gfx.printf(coordFormat, wposX);
   
-  gfx->fillRect(150, 145, 320, 38, COLOR_BG);
-  gfx->setCursor(150, 145);
-  gfx->printf(coordFormat, wposY);
+  gfx.fillRect(150, 145, 320, 38, COLOR_BG);
+  gfx.setCursor(150, 145);
+  gfx.printf(coordFormat, wposY);
   
-  gfx->fillRect(150, 200, 320, 38, COLOR_BG);
-  gfx->setCursor(150, 200);
-  gfx->printf(coordFormat, wposZ);
+  gfx.fillRect(150, 200, 320, 38, COLOR_BG);
+  gfx.setCursor(150, 200);
+  gfx.printf(coordFormat, wposZ);
   
   // Update footer
-  gfx->setTextSize(1);
-  gfx->fillRect(90, 270, 390, 45, COLOR_BG);
+  gfx.setTextSize(1);
+  gfx.fillRect(90, 270, 390, 45, COLOR_BG);
   
-  gfx->setTextColor(COLOR_LINE);
-  gfx->setCursor(90, 270);
-  gfx->printf("X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
+  gfx.setTextColor(COLOR_LINE);
+  gfx.setCursor(90, 270);
+  gfx.printf("X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
   
-  gfx->setCursor(80, 285);
-  if (machineState == "RUN") gfx->setTextColor(COLOR_GOOD);
-  else if (machineState == "ALARM") gfx->setTextColor(COLOR_WARN);
-  else gfx->setTextColor(COLOR_VALUE);
-  gfx->printf("%s", machineState.c_str());
+  gfx.setCursor(80, 285);
+  if (machineState == "RUN") gfx.setTextColor(COLOR_GOOD);
+  else if (machineState == "ALARM") gfx.setTextColor(COLOR_WARN);
+  else gfx.setTextColor(COLOR_VALUE);
+  gfx.printf("%s", machineState.c_str());
   
   float maxTemp = temperatures[0];
   for (int i = 1; i < 4; i++) {
     if (temperatures[i] > maxTemp) maxTemp = temperatures[i];
   }
   
-  gfx->setTextColor(maxTemp > cfg.temp_threshold_high ? COLOR_WARN : COLOR_LINE);
-  gfx->setCursor(90, 300);
-  gfx->printf("%.0fC  Fan:%d%%  PSU:%.1fV", maxTemp, fanSpeed, psuVoltage);
+  gfx.setTextColor(maxTemp > cfg.temp_threshold_high ? COLOR_WARN : COLOR_LINE);
+  gfx.setCursor(90, 300);
+  gfx.printf("%.0fC  Fan:%d%%  PSU:%.1fV", maxTemp, fanSpeed, psuVoltage);
 }
 
 void drawGraphMode() {
-  gfx->fillScreen(COLOR_BG);
+  gfx.fillScreen(COLOR_BG);
   
   // Header
-  gfx->fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
-  gfx->setTextColor(COLOR_TEXT);
-  gfx->setTextSize(2);
-  gfx->setCursor(100, 6);
-  gfx->print("TEMPERATURE HISTORY");
+  gfx.fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setTextSize(2);
+  gfx.setCursor(100, 6);
+  gfx.print("TEMPERATURE HISTORY");
   
   char timeLabel[40];
   if (cfg.graph_timespan_seconds >= 60) {
@@ -1840,11 +1927,11 @@ void drawGraphMode() {
   } else {
     sprintf(timeLabel, " - %d seconds", cfg.graph_timespan_seconds);
   }
-  gfx->setTextSize(1);
-  gfx->setCursor(330, 10);
-  gfx->print(timeLabel);
+  gfx.setTextSize(1);
+  gfx.setCursor(330, 10);
+  gfx.print(timeLabel);
   
-  gfx->drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
+  gfx.drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
   
   // Full screen graph
   drawTempGraph(20, 40, 440, 270);
@@ -1857,133 +1944,133 @@ void updateGraphMode() {
 
 void drawNetworkMode() {
   // Header
-  gfx->fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
-  gfx->setTextColor(COLOR_TEXT);
-  gfx->setTextSize(2);
-  gfx->setCursor(120, 6);
-  gfx->print("NETWORK STATUS");
+  gfx.fillRect(0, 0, SCREEN_WIDTH, 25, COLOR_HEADER);
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setTextSize(2);
+  gfx.setCursor(120, 6);
+  gfx.print("NETWORK STATUS");
 
-  gfx->drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
+  gfx.drawFastHLine(0, 25, SCREEN_WIDTH, COLOR_LINE);
 
-  gfx->setTextSize(2);
-  gfx->setTextColor(COLOR_TEXT);
+  gfx.setTextSize(2);
+  gfx.setTextColor(COLOR_TEXT);
 
   if (inAPMode) {
     // AP Mode display
-    gfx->setCursor(60, 50);
-    gfx->setTextColor(COLOR_WARN);
-    gfx->print("WiFi Config Mode Active");
+    gfx.setCursor(60, 50);
+    gfx.setTextColor(COLOR_WARN);
+    gfx.print("WiFi Config Mode Active");
 
-    gfx->setTextSize(1);
-    gfx->setTextColor(COLOR_TEXT);
-    gfx->setCursor(10, 90);
-    gfx->print("1. Connect to WiFi network:");
+    gfx.setTextSize(1);
+    gfx.setTextColor(COLOR_TEXT);
+    gfx.setCursor(10, 90);
+    gfx.print("1. Connect to WiFi network:");
 
-    gfx->setTextSize(2);
-    gfx->setTextColor(COLOR_VALUE);
-    gfx->setCursor(40, 110);
-    gfx->print("FluidDash-Setup");
+    gfx.setTextSize(2);
+    gfx.setTextColor(COLOR_VALUE);
+    gfx.setCursor(40, 110);
+    gfx.print("FluidDash-Setup");
 
-    gfx->setTextSize(1);
-    gfx->setTextColor(COLOR_TEXT);
-    gfx->setCursor(10, 145);
-    gfx->print("2. Open browser and go to:");
+    gfx.setTextSize(1);
+    gfx.setTextColor(COLOR_TEXT);
+    gfx.setCursor(10, 145);
+    gfx.print("2. Open browser and go to:");
 
-    gfx->setTextSize(2);
-    gfx->setTextColor(COLOR_VALUE);
-    gfx->setCursor(80, 165);
-    gfx->print("http://192.168.4.1");
+    gfx.setTextSize(2);
+    gfx.setTextColor(COLOR_VALUE);
+    gfx.setCursor(80, 165);
+    gfx.print("http://192.168.4.1");
 
-    gfx->setTextSize(1);
-    gfx->setTextColor(COLOR_TEXT);
-    gfx->setCursor(10, 200);
-    gfx->print("3. Configure your WiFi settings");
+    gfx.setTextSize(1);
+    gfx.setTextColor(COLOR_TEXT);
+    gfx.setCursor(10, 200);
+    gfx.print("3. Configure your WiFi settings");
 
-    gfx->setCursor(10, 230);
-    gfx->setTextColor(COLOR_LINE);
-    gfx->print("Temperature monitoring continues in background");
+    gfx.setCursor(10, 230);
+    gfx.setTextColor(COLOR_LINE);
+    gfx.print("Temperature monitoring continues in background");
 
     // Show to exit AP mode
-    gfx->setTextColor(COLOR_ORANGE);
-    gfx->setCursor(10, 270);
-    gfx->print("Press button briefly to return to monitoring");
+    gfx.setTextColor(COLOR_ORANGE);
+    gfx.setCursor(10, 270);
+    gfx.print("Press button briefly to return to monitoring");
 
   } else {
     // Normal network status display
     if (WiFi.status() == WL_CONNECTED) {
-      gfx->setCursor(130, 50);
-      gfx->setTextColor(COLOR_GOOD);
-      gfx->print("WiFi Connected");
+      gfx.setCursor(130, 50);
+      gfx.setTextColor(COLOR_GOOD);
+      gfx.print("WiFi Connected");
 
-      gfx->setTextSize(1);
-      gfx->setTextColor(COLOR_TEXT);
+      gfx.setTextSize(1);
+      gfx.setTextColor(COLOR_TEXT);
 
-      gfx->setCursor(10, 90);
-      gfx->print("SSID:");
-      gfx->setTextColor(COLOR_VALUE);
-      gfx->setCursor(80, 90);
-      gfx->print(WiFi.SSID());
+      gfx.setCursor(10, 90);
+      gfx.print("SSID:");
+      gfx.setTextColor(COLOR_VALUE);
+      gfx.setCursor(80, 90);
+      gfx.print(WiFi.SSID());
 
-      gfx->setTextColor(COLOR_TEXT);
-      gfx->setCursor(10, 115);
-      gfx->print("IP Address:");
-      gfx->setTextColor(COLOR_VALUE);
-      gfx->setCursor(80, 115);
-      gfx->print(WiFi.localIP());
+      gfx.setTextColor(COLOR_TEXT);
+      gfx.setCursor(10, 115);
+      gfx.print("IP Address:");
+      gfx.setTextColor(COLOR_VALUE);
+      gfx.setCursor(80, 115);
+      gfx.print(WiFi.localIP());
 
-      gfx->setTextColor(COLOR_TEXT);
-      gfx->setCursor(10, 140);
-      gfx->print("Signal:");
-      gfx->setTextColor(COLOR_VALUE);
-      gfx->setCursor(80, 140);
+      gfx.setTextColor(COLOR_TEXT);
+      gfx.setCursor(10, 140);
+      gfx.print("Signal:");
+      gfx.setTextColor(COLOR_VALUE);
+      gfx.setCursor(80, 140);
       int rssi = WiFi.RSSI();
-      gfx->printf("%d dBm", rssi);
+      gfx.printf("%d dBm", rssi);
 
-      gfx->setTextColor(COLOR_TEXT);
-      gfx->setCursor(10, 165);
-      gfx->print("mDNS:");
-      gfx->setTextColor(COLOR_VALUE);
-      gfx->setCursor(80, 165);
-      gfx->printf("http://%s.local", cfg.device_name);
+      gfx.setTextColor(COLOR_TEXT);
+      gfx.setCursor(10, 165);
+      gfx.print("mDNS:");
+      gfx.setTextColor(COLOR_VALUE);
+      gfx.setCursor(80, 165);
+      gfx.printf("http://%s.local", cfg.device_name);
 
       if (fluidncConnected) {
-        gfx->setTextColor(COLOR_TEXT);
-        gfx->setCursor(10, 190);
-        gfx->print("FluidNC:");
-        gfx->setTextColor(COLOR_GOOD);
-        gfx->setCursor(80, 190);
-        gfx->print("Connected");
+        gfx.setTextColor(COLOR_TEXT);
+        gfx.setCursor(10, 190);
+        gfx.print("FluidNC:");
+        gfx.setTextColor(COLOR_GOOD);
+        gfx.setCursor(80, 190);
+        gfx.print("Connected");
       } else {
-        gfx->setTextColor(COLOR_TEXT);
-        gfx->setCursor(10, 190);
-        gfx->print("FluidNC:");
-        gfx->setTextColor(COLOR_WARN);
-        gfx->setCursor(80, 190);
-        gfx->print("Disconnected");
+        gfx.setTextColor(COLOR_TEXT);
+        gfx.setCursor(10, 190);
+        gfx.print("FluidNC:");
+        gfx.setTextColor(COLOR_WARN);
+        gfx.setCursor(80, 190);
+        gfx.print("Disconnected");
       }
 
     } else {
-      gfx->setCursor(120, 50);
-      gfx->setTextColor(COLOR_WARN);
-      gfx->print("WiFi Not Connected");
+      gfx.setCursor(120, 50);
+      gfx.setTextColor(COLOR_WARN);
+      gfx.print("WiFi Not Connected");
 
-      gfx->setTextSize(1);
-      gfx->setTextColor(COLOR_TEXT);
-      gfx->setCursor(10, 100);
-      gfx->print("Temperature monitoring active (standalone mode)");
+      gfx.setTextSize(1);
+      gfx.setTextColor(COLOR_TEXT);
+      gfx.setCursor(10, 100);
+      gfx.print("Temperature monitoring active (standalone mode)");
 
-      gfx->setCursor(10, 130);
-      gfx->setTextColor(COLOR_ORANGE);
-      gfx->print("To configure WiFi:");
+      gfx.setCursor(10, 130);
+      gfx.setTextColor(COLOR_ORANGE);
+      gfx.print("To configure WiFi:");
     }
 
     // Instructions for entering AP mode
-    gfx->setTextSize(1);
-    gfx->setTextColor(COLOR_LINE);
-    gfx->setCursor(10, 250);
-    gfx->print("Hold button for 10 seconds to enter WiFi");
-    gfx->setCursor(10, 265);
-    gfx->print("configuration mode");
+    gfx.setTextSize(1);
+    gfx.setTextColor(COLOR_LINE);
+    gfx.setCursor(10, 250);
+    gfx.print("Hold button for 10 seconds to enter WiFi");
+    gfx.setCursor(10, 265);
+    gfx.print("configuration mode");
   }
 }
 
@@ -1993,8 +2080,8 @@ void updateNetworkMode() {
 }
 
 void drawTempGraph(int x, int y, int w, int h) {
-  gfx->fillRect(x, y, w, h, COLOR_BG);
-  gfx->drawRect(x, y, w, h, COLOR_LINE);
+  gfx.fillRect(x, y, w, h, COLOR_BG);
+  gfx.drawRect(x, y, w, h, COLOR_LINE);
   
   float minTemp = 10.0;
   float maxTemp = 60.0;
@@ -2021,18 +2108,18 @@ void drawTempGraph(int x, int y, int w, int h) {
     else if (temp2 > cfg.temp_threshold_low) color = COLOR_ORANGE;
     else color = COLOR_GOOD;
     
-    gfx->drawLine(x1, y1, x2, y2, color);
+    gfx.drawLine(x1, y1, x2, y2, color);
   }
   
   // Scale markers
-  gfx->setTextSize(1);
-  gfx->setTextColor(COLOR_LINE);
-  gfx->setCursor(x + 3, y + 2);
-  gfx->print("60");
-  gfx->setCursor(x + 3, y + h / 2 - 5);
-  gfx->print("35");
-  gfx->setCursor(x + 3, y + h - 10);
-  gfx->print("10");
+  gfx.setTextSize(1);
+  gfx.setTextColor(COLOR_LINE);
+  gfx.setCursor(x + 3, y + 2);
+  gfx.print("60");
+  gfx.setCursor(x + 3, y + h / 2 - 5);
+  gfx.print("35");
+  gfx.setCursor(x + 3, y + h - 10);
+  gfx.print("10");
 }
 
 // ========== Button Handling ==========
@@ -2064,15 +2151,15 @@ void cycleDisplayMode() {
   drawScreen();
   
   // Flash mode name
-  gfx->fillRect(180, 140, 120, 40, COLOR_HEADER);
-  gfx->setTextColor(COLOR_TEXT);
-  gfx->setTextSize(2);
-  gfx->setCursor(190, 150);
+  gfx.fillRect(180, 140, 120, 40, COLOR_HEADER);
+  gfx.setTextColor(COLOR_TEXT);
+  gfx.setTextSize(2);
+  gfx.setCursor(190, 150);
   
   switch(currentMode) {
-    case MODE_MONITOR: gfx->print("MONITOR"); break;
-    case MODE_ALIGNMENT: gfx->print("ALIGNMENT"); break;
-    case MODE_GRAPH: gfx->print("GRAPH"); break;
+    case MODE_MONITOR: gfx.print("MONITOR"); break;
+    case MODE_ALIGNMENT: gfx.print("ALIGNMENT"); break;
+    case MODE_GRAPH: gfx.print("GRAPH"); break;
   }
   
   delay(800);
@@ -2084,19 +2171,19 @@ void showHoldProgress() {
   int progress = map(elapsed, 2000, 5000, 0, 100);
   progress = constrain(progress, 0, 100);
   
-  gfx->fillRect(140, 280, 200, 30, COLOR_BG);
-  gfx->drawRect(140, 280, 200, 30, COLOR_TEXT);
-  gfx->setTextColor(COLOR_WARN);
-  gfx->setTextSize(1);
-  gfx->setCursor(145, 285);
-  gfx->print("Hold for Setup...");
+  gfx.fillRect(140, 280, 200, 30, COLOR_BG);
+  gfx.drawRect(140, 280, 200, 30, COLOR_TEXT);
+  gfx.setTextColor(COLOR_WARN);
+  gfx.setTextSize(1);
+  gfx.setCursor(145, 285);
+  gfx.print("Hold for Setup...");
   
   int barWidth = map(progress, 0, 100, 0, 190);
-  gfx->fillRect(145, 295, barWidth, 10, COLOR_WARN);
+  gfx.fillRect(145, 295, barWidth, 10, COLOR_WARN);
   
-  gfx->setCursor(145, 307);
-  gfx->print(10 - (elapsed / 1000));
-  gfx->print(" sec");
+  gfx.setCursor(145, 307);
+  gfx.print(10 - (elapsed / 1000));
+  gfx.print(" sec");
 }
 
 void enterSetupMode() {
@@ -2122,15 +2209,15 @@ void enterSetupMode() {
 }
 
 void showSplashScreen() {
-  gfx->setTextColor(COLOR_HEADER);
-  gfx->setTextSize(3);
-  gfx->setCursor(80, 120);
-  gfx->println("FluidDash");
-  gfx->setTextSize(2);
-  gfx->setCursor(140, 160);
-  gfx->println("v0.7");
-  gfx->setCursor(160, 190);
-  gfx->println("Initializing...");
+  gfx.setTextColor(COLOR_HEADER);
+  gfx.setTextSize(3);
+  gfx.setCursor(80, 120);
+  gfx.println("FluidDash");
+  gfx.setTextSize(2);
+  gfx.setCursor(140, 160);
+  gfx.println("v0.7");
+  gfx.setCursor(160, 190);
+  gfx.println("Initializing...");
 }
 
 const char* getMonthName(int month) {
