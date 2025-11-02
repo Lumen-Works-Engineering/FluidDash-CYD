@@ -349,11 +349,8 @@ void setup() {
   showSplashScreen();
   delay(2000);  // Show splash briefly
 
-  // Draw initial screen
-  drawScreen();
+  // Initialize hardware BEFORE drawing (RTC needed for datetime display)
   feedLoopWDT();
-
-  // Initialize hardware
   Wire.begin(21, 22);
   rtc.begin();
   pinMode(BTN_MODE, INPUT_PULLUP);

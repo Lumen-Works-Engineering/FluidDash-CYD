@@ -8,7 +8,8 @@
       "Bash(powershell -Command \"Remove-Item -Recurse -Force ''c:\\Users\\john_sparks\\Documents\\PlatformIO\\Projects\\251021-085358-esp32dev\\.pio\\libdeps\\esp32dev\\GFX Library for Arduino''\")",
       "Bash(powershell -Command:*)",
       "Bash(pio device monitor:*)",
-      "Read(//c/Users/john_sparks/.platformio/packages/framework-arduinoespressif32/**)"
+      "Read(//c/Users/john_sparks/.platformio/packages/framework-arduinoespressif32/**)",
+      "Bash(timeout /t 3)"
     ],
     "deny": [],
     "ask": []
