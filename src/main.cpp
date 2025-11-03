@@ -1422,6 +1422,151 @@ void setupWebServer() {
       
       Serial.printf("[JSON] Reloaded %d layouts\n", loaded);
   });
+    // ========== WEB JSON UPLOAD & EDITOR ==========
+  
+  // Upload page
+  server.on("/upload", HTTP_GET, [](AsyncWebServerRequest *request){
+      String html = "<!DOCTYPE html><html><head><title>Upload JSON</title>";
+      html += "<style>body{font-family:Arial;margin:20px;background:#1a1a1a;color:#fff}";
+      html += "h1{color:#00bfff}.box{background:#2a2a2a;padding:20px;border-radius:8px;max-width:600px}";
+      html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;cursor:pointer}";
+      html += "#status{margin-top:20px;padding:10px}.success{background:#004d00;color:#0f0}";
+      html += ".error{background:#4d0000;color:#f00}</style></head><body>";
+      html += "<h1>Upload JSON</h1><div class='box'><h3>Upload Screen Layout</h3>";
+      html += "<form id='f' enctype='multipart/form-data'>";
+      html += "<input type='file' id='file' accept='.json' required><br><br>";
+      html += "<button type='submit'>Upload</button></form>";
+      html += "<div id='status'></div></div>";
+      html += "<script>document.getElementById('f').addEventListener('submit',function(e){";
+      html += "e.preventDefault();let file=document.getElementById('file').files[0];";
+      html += "if(!file)return;let s=document.getElementById('status');";
+      html += "s.innerHTML='Uploading...';s.className='';let fd=new FormData();";
+      html += "fd.append('file',file);fetch('/upload-json',{method:'POST',body:fd})";
+      html += ".then(r=>r.json()).then(d=>{if(d.success){s.innerHTML='Uploaded!';";
+      html += "s.className='success';fetch('/api/reload-screens',{method:'POST'})}";
+      html += "else{s.innerHTML='Error';s.className='error'}})";
+      html += ".catch(e=>{s.innerHTML='Failed';s.className='error'})});</script>";
+      html += "</body></html>";
+      request->send(200, "text/html", html);
+  });
+  
+  // Handle file upload
+  server.on("/upload-json", HTTP_POST, 
+      [](AsyncWebServerRequest *request){ request->send(200); },
+      [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+          static File uploadFile;
+          if(index == 0){
+              if(!filename.endsWith(".json")){
+                  Serial.println("[Upload] Not a JSON file");
+                  return;
+              }
+              String path = "/screens/" + filename;
+              uploadFile = SD.open(path, FILE_WRITE);
+              if(!uploadFile){
+                  Serial.printf("[Upload] Cannot create %s\n", path.c_str());
+                  return;
+              }
+          }
+          if(uploadFile && len){
+              uploadFile.write(data, len);
+          }
+          if(final && uploadFile){
+              uploadFile.close();
+              Serial.printf("[Upload] Complete: %s\n", filename.c_str());
+          }
+      }
+  );
+  
+  // Get JSON file
+  server.on("/get-json", HTTP_GET, [](AsyncWebServerRequest *request){
+      if(!request->hasParam("file")){
+          request->send(400, "application/json", "{\"success\":false}");
+          return;
+      }
+      String filename = request->getParam("file")->value();
+      String path = "/screens/" + filename;
+      File file = SD.open(path, FILE_READ);
+      if(!file){
+          request->send(404, "application/json", "{\"success\":false}");
+          return;
+      }
+      String content = file.readString();
+      file.close();
+      String response = "{\"success\":true,\"content\":" + content + "}";
+      request->send(200, "application/json", response);
+  });
+  
+  // Save JSON file
+  server.on("/save-json", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
+      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+          static String jsonData;
+          if(index == 0) jsonData = "";
+          for(size_t i = 0; i < len; i++) jsonData += (char)data[i];
+          if(index + len == total){
+              JsonDocument doc;
+              if(deserializeJson(doc, jsonData)){
+                  request->send(400, "application/json", "{\"success\":false}");
+                  return;
+              }
+              String filename = doc["filename"];
+              String content = doc["content"];
+              String path = "/screens/" + filename;
+              File file = SD.open(path, FILE_WRITE);
+              if(!file){
+                  request->send(500, "application/json", "{\"success\":false}");
+                  return;
+              }
+              file.print(content);
+              file.close();
+              Serial.printf("[Editor] Saved: %s\n", path.c_str());
+              request->send(200, "application/json", "{\"success\":true}");
+          }
+      }
+  );
+  
+  // Editor page
+  server.on("/editor", HTTP_GET, [](AsyncWebServerRequest *request){
+      String html = "<!DOCTYPE html><html><head><title>JSON Editor</title>";
+      html += "<style>body{margin:0;background:#1a1a1a;color:#fff;font-family:monospace}";
+      html += ".container{display:flex;height:100vh}.sidebar{width:200px;background:#2a2a2a;padding:10px}";
+      html += ".editor{flex:1;display:flex;flex-direction:column;padding:10px}";
+      html += "textarea{flex:1;background:#0a0a0a;color:#0f0;border:1px solid #00bfff;padding:10px;font-family:monospace}";
+      html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;margin:5px;cursor:pointer}";
+      html += ".file-btn{background:#2a2a2a;color:#fff;padding:8px;margin:2px 0;width:100%;text-align:left}";
+      html += "#status{padding:10px;margin:10px 0}.success{background:#004d00;color:#0f0}";
+      html += ".error{background:#4d0000;color:#f00}</style></head><body>";
+      html += "<div class='container'><div class='sidebar'><h3>Files</h3>";
+      html += "<button class='file-btn' onclick=\"loadFile('monitor.json')\">monitor.json</button>";
+      html += "<button class='file-btn' onclick=\"loadFile('alignment.json')\">alignment.json</button>";
+      html += "<button class='file-btn' onclick=\"loadFile('graph.json')\">graph.json</button>";
+      html += "<button class='file-btn' onclick=\"loadFile('network.json')\">network.json</button></div>";
+      html += "<div class='editor'><h2 id='filename'>Select file</h2>";
+      html += "<textarea id='editor' placeholder='Load a JSON file...'></textarea><div>";
+      html += "<button onclick='saveFile()'>Save</button>";
+      html += "<button onclick='validate()'>Validate</button>";
+      html += "<button onclick='reload()'>Reload</button></div>";
+      html += "<div id='status'></div></div></div>";
+      html += "<script>let cf='';function show(m,t){document.getElementById('status').innerHTML=m;";
+      html += "document.getElementById('status').className=t}";
+      html += "function loadFile(f){cf=f;document.getElementById('filename').innerText='Editing: '+f;";
+      html += "fetch('/get-json?file='+f).then(r=>r.json()).then(d=>{if(d.success){";
+      html += "document.getElementById('editor').value=JSON.stringify(d.content,null,2);";
+      html += "show('Loaded','success')}else{show('Not found','error')}})}";
+      html += "function saveFile(){if(!cf){show('No file','error');return}";
+      html += "let c=document.getElementById('editor').value;try{JSON.parse(c)}catch(e){";
+      html += "show('Invalid JSON','error');return}";
+      html += "fetch('/save-json',{method:'POST',headers:{'Content-Type':'application/json'},";
+      html += "body:JSON.stringify({filename:cf,content:c})}).then(r=>r.json()).then(d=>{";
+      html += "if(d.success)show('Saved!','success');else show('Failed','error')})}";
+      html += "function validate(){try{let c=document.getElementById('editor').value;";
+      html += "let p=JSON.parse(c);show('Valid ('+p.elements.length+' elements)','success')}";
+      html += "catch(e){show('Invalid JSON','error')}}";
+      html += "function reload(){fetch('/api/reload-screens',{method:'POST'}).then(r=>r.json()).then(d=>{";
+      html += "show('Reloaded!','success')})}</script></body></html>";
+      request->send(200, "text/html", html);
+  });
+  
+  // ========== END WEB JSON UPLOAD & EDITOR ==========
 
   server.begin();
   Serial.println("Web server started");
