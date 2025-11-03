@@ -43,6 +43,9 @@ public:
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
+#include <ESPmDNS.h>
+#include <SD.h>
+#include <SPI.h>
 
 // ========== CYD HARDWARE PIN CONFIGURATION ==========
 // Compatible with E32R35T (3.5") and E32R40T (4.0")
@@ -74,6 +77,11 @@ public:
 
 // Mode button (use GPIO0 - BOOT button)
 #define BTN_MODE    0
+// SD Card (VSPI bus)
+#define SD_CS    5
+#define SD_MOSI  23
+#define SD_SCK   18
+#define SD_MISO  19
 
 // Constants
 #define PWM_FREQ     25000
@@ -253,6 +261,7 @@ WiFiManager wm;
 
 // Runtime variables
 DisplayMode currentMode;
+bool sdCardAvailable = false;
 volatile uint16_t tachCounter = 0;
 uint16_t fanRPM = 0;
 uint8_t fanSpeed = 0;
@@ -466,7 +475,53 @@ void setup() {
     Serial.println("WiFi Connected!");
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
-
+    // ========== ADD SD CARD TEST HERE ==========
+    feedLoopWDT();
+    Serial.println("\n=== Testing SD Card ===");
+    
+    // Initialize SD card on VSPI bus
+    SPIClass spiSD(VSPI);
+    spiSD.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    
+    if (SD.begin(SD_CS, spiSD)) {
+        sdCardAvailable = true;
+        Serial.println("SUCCESS: SD card initialized!");
+        
+        // Get card info
+        uint8_t cardType = SD.cardType();
+        Serial.print("SD Card Type: ");
+        if (cardType == CARD_MMC) {
+            Serial.println("MMC");
+        } else if (cardType == CARD_SD) {
+            Serial.println("SDSC");
+        } else if (cardType == CARD_SDHC) {
+            Serial.println("SDHC");
+        } else {
+            Serial.println("Unknown");
+        }
+        
+        uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+        Serial.printf("SD Card Size: %lluMB\n", cardSize);
+        
+        // Create screens directory for Phase 2
+        if (!SD.exists("/screens")) {
+            if (SD.mkdir("/screens")) {
+                Serial.println("Created directory: /screens");
+            } else {
+                Serial.println("Failed to create /screens directory");
+            }
+        } else {
+            Serial.println("Directory exists: /screens");
+        }
+        
+        Serial.println("SD card ready for Phase 2!\n");
+    } else {
+        sdCardAvailable = false;
+        Serial.println("WARNING: SD card not detected");
+        Serial.println("Insert SD card and restart for Phase 2 features\n");
+    }
+    // ========== END SD CARD TEST ==========
+    
     feedLoopWDT();
 
     // Set up mDNS
