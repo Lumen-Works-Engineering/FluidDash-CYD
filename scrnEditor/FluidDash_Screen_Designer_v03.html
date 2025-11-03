@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FluidDash Screen Designer v3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            display: flex;
+            gap: 20px;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-y: auto;
+            max-height: calc(100vh - 40px);
+        }
+
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .canvas-container {
+            background: #2d2d30;
+            padding: 20px;
+            border-radius: 8px;
+            display: inline-block;
+            width: fit-content;
+            position: relative;
+        }
+
+        #canvas {
+            border: 2px solid #007acc;
+            background: #000;
+            cursor: crosshair;
+            display: block;
+        }
+
+        .canvas-info {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #858585;
+        }
+
+        .properties {
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        h2 {
+            color: #007acc;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        h3 {
+            color: #4ec9b0;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .tool-btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #0e639c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .tool-btn:hover {
+            background: #1177bb;
+        }
+
+        .tool-btn.active {
+            background: #007acc;
+            box-shadow: 0 0 0 2px #4fc3f7;
+        }
+
+        .input-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 12px;
+            color: #858585;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 6px;
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+
+        .color-input-group {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .color-input-group input[type="text"] {
+            flex: 1;
+        }
+
+        .color-preview {
+            width: 40px;
+            height: 28px;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            background: #16825d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .action-btn:hover {
+            background: #1a9e6f;
+        }
+
+        .action-btn.danger {
+            background: #d32f2f;
+        }
+
+        .action-btn.danger:hover {
+            background: #e53935;
+        }
+
+        .action-btn.secondary {
+            background: #505050;
+        }
+
+        .action-btn.secondary:hover {
+            background: #606060;
+        }
+
+        .element-list {
+            max-height: 400px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            border: 1px solid #555;
+            border-radius: 3px;
+            padding: 5px;
+        }
+
+        .element-item {
+            padding: 8px;
+            margin-bottom: 4px;
+            background: #2d2d30;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+            transition: background 0.2s;
+        }
+
+        .element-item:hover {
+            background: #37373d;
+        }
+
+        .element-item.selected {
+            background: #094771;
+        }
+
+        .element-info {
+            flex: 1;
+        }
+
+        .element-type {
+            color: #4ec9b0;
+            font-weight: bold;
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+
+        .element-description {
+            color: #858585;
+            font-size: 10px;
+            line-height: 1.3;
+        }
+
+        .element-label {
+            color: #ffff00;
+            font-size: 11px;
+            margin-top: 2px;
+        }
+
+        .element-coords {
+            color: #666;
+            font-size: 10px;
+            margin-top: 2px;
+        }
+
+        .element-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        .element-item button {
+            background: #d32f2f;
+            border: none;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .eye-btn {
+            background: #0e639c !important;
+        }
+
+        .eye-btn:hover {
+            background: #1177bb !important;
+        }
+
+        #jsonOutput {
+            width: 100%;
+            height: 300px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border: 1px solid #555;
+            border-radius: 3px;
+            padding: 10px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .load-section {
+            background: #2d2d30;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .load-section textarea {
+            height: 100px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .hover-label {
+            position: absolute;
+            background: rgba(0, 122, 204, 0.9);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            pointer-events: none;
+            z-index: 100;
+            display: none;
+            white-space: nowrap;
+        }
+
+        .layer-controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+
+        .layer-controls button {
+            padding: 5px 10px;
+            font-size: 11px;
+            background: #505050;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .layer-controls button:hover {
+            background: #606060;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>FluidDash Designer v3</h2>
+        <p style="font-size: 12px; color: #858585; margin-bottom: 20px;">480x320 Landscape</p>
+
+        <div class="load-section">
+            <h3 style="margin-top: 0;">Load Existing JSON</h3>
+            <button class="action-btn secondary" onclick="document.getElementById('fileInput').click()">
+                📁 Load from File
+            </button>
+            <input type="file" id="fileInput" accept=".json" onchange="loadFromFile(event)">
+
+            <p style="font-size: 11px; color: #858585; margin: 10px 0 5px 0;">Or paste JSON:</p>
+            <textarea id="pasteArea" placeholder="Paste JSON here..."></textarea>
+            <button class="action-btn secondary" onclick="loadFromPaste()">Load from Paste</button>
+        </div>
+
+        <h3>Add Elements</h3>
+        <button class="tool-btn" onclick="setTool('rect')">Rectangle</button>
+        <button class="tool-btn" onclick="setTool('line')">Line</button>
+        <button class="tool-btn" onclick="setTool('text')">Text Label</button>
+        <button class="tool-btn" onclick="setTool('temp')">Temperature</button>
+        <button class="tool-btn" onclick="setTool('coord')">Coordinate</button>
+        <button class="tool-btn" onclick="setTool('status')">Status</button>
+        <button class="tool-btn" onclick="setTool('dynamic')">Dynamic Text</button>
+
+        <h3>Screen Settings</h3>
+        <div class="input-group">
+            <label>Screen Name</label>
+            <input type="text" id="screenName" value="Monitor" onchange="updateJSON()">
+        </div>
+        <div class="input-group">
+            <label>Background Color (RGB565)</label>
+            <div class="color-input-group">
+                <input type="text" id="bgColor" value="0000" maxlength="4" onchange="updateJSON()">
+                <div class="color-preview" id="bgColorPreview" onclick="showColorPicker('bgColor')"></div>
+            </div>
+        </div>
+
+        <h3>Elements (<span id="elementCount">0</span>)</h3>
+        <div class="element-list" id="elementList"></div>
+
+        <button class="action-btn" onclick="exportJSON()">📋 Copy JSON to Clipboard</button>
+        <button class="action-btn" onclick="downloadJSON()">💾 Download JSON File</button>
+        <button class="action-btn danger" onclick="clearAll()">🗑️ Clear All Elements</button>
+    </div>
+
+    <div class="main-area">
+        <div class="canvas-container">
+            <canvas id="canvas" width="480" height="320"></canvas>
+            <div class="hover-label" id="hoverLabel"></div>
+            <div class="canvas-info">
+                <span>Click to place elements • Coordinates: <span id="coordDisplay">0, 0</span></span>
+                <div class="layer-controls">
+                    <button onclick="toggleLabels()">
+                        <span id="labelToggle">🏷️ Show Labels</span>
+                    </button>
+                    <button onclick="toggleGrid()">
+                        <span id="gridToggle">📐 Hide Grid</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="properties" id="propertiesPanel" style="display: none;">
+            <h2>Element Properties</h2>
+            <div id="propertyInputs"></div>
+            <button class="action-btn" onclick="updateElement()">✓ Update Element</button>
+            <button class="action-btn danger" onclick="deleteElement()">✗ Delete Element</button>
+        </div>
+
+        <div class="properties">
+            <h2>JSON Output</h2>
+            <textarea id="jsonOutput" readonly></textarea>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const hoverLabel = document.getElementById('hoverLabel');
+        let currentTool = null;
+        let elements = [];
+        let selectedElement = null;
+        let showLabels = false;
+        let showGrid = true;
+        let hoveredElement = null;
+
+        // Common RGB565 colors
+        const colorPresets = {
+            '0000': '#000000', 'FFFF': '#FFFFFF', 'F800': '#FF0000',
+            '07E0': '#00FF00', '001F': '#0000FF', 'FFE0': '#FFFF00',
+            '07FF': '#00FFFF', 'F81F': '#FF00FF', '4A49': '#494949'
+        };
+
+        function rgb565ToRgb(hex) {
+            if (!hex) return '#000000';
+            const upper = hex.toUpperCase();
+            if (colorPresets[upper]) return colorPresets[upper];
+            const val = parseInt(hex, 16);
+            const r = ((val >> 11) & 0x1F) * 255 / 31;
+            const g = ((val >> 5) & 0x3F) * 255 / 63;
+            const b = (val & 0x1F) * 255 / 31;
+            return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+        }
+
+        function getElementDescription(el) {
+            let desc = '';
+            if (el.label) desc += `"${el.label}"`;
+            if (el.data) desc += (desc ? ' • ' : '') + el.data;
+            if (el.w && el.h) desc += (desc ? ' • ' : '') + `${el.w}×${el.h}`;
+            if (!desc) desc = `${el.w || 50}×${el.h || 20}`;
+            return desc;
+        }
+
+        function loadFromFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    loadJSONData(json);
+                    alert('✓ JSON file loaded successfully!');
+                } catch (err) {
+                    alert('Error parsing JSON: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function loadFromPaste() {
+            const text = document.getElementById('pasteArea').value.trim();
+            if (!text) {
+                alert('Please paste JSON text first');
+                return;
+            }
+
+            try {
+                const json = JSON.parse(text);
+                loadJSONData(json);
+                document.getElementById('pasteArea').value = '';
+                alert('✓ JSON loaded successfully!');
+            } catch (err) {
+                alert('Error parsing JSON: ' + err.message);
+            }
+        }
+
+        function loadJSONData(json) {
+            elements = [];
+            selectedElement = null;
+            document.getElementById('propertiesPanel').style.display = 'none';
+
+            if (json.name) document.getElementById('screenName').value = json.name;
+            if (json.background) document.getElementById('bgColor').value = json.background;
+
+            if (json.elements && Array.isArray(json.elements)) {
+                elements = json.elements;
+            }
+
+            redrawCanvas();
+            updateElementList();
+            updateJSON();
+        }
+
+        function setTool(tool) {
+            currentTool = tool;
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        function toggleLabels() {
+            showLabels = !showLabels;
+            document.getElementById('labelToggle').textContent = showLabels ? '🏷️ Hide Labels' : '🏷️ Show Labels';
+            redrawCanvas();
+        }
+
+        function toggleGrid() {
+            showGrid = !showGrid;
+            document.getElementById('gridToggle').textContent = showGrid ? '📐 Hide Grid' : '📐 Show Grid';
+            redrawCanvas();
+        }
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.round(e.clientX - rect.left);
+            const y = Math.round(e.clientY - rect.top);
+            document.getElementById('coordDisplay').textContent = `${x}, ${y}`;
+
+            // Check if hovering over an element
+            let foundElement = null;
+            for (let i = elements.length - 1; i >= 0; i--) {
+                const el = elements[i];
+                const w = el.w || 50;
+                const h = el.h || 20;
+                if (x >= el.x && x <= el.x + w && y >= el.y && y <= el.y + h) {
+                    foundElement = i;
+                    break;
+                }
+            }
+
+            if (foundElement !== null && foundElement !== hoveredElement) {
+                hoveredElement = foundElement;
+                const el = elements[foundElement];
+                hoverLabel.textContent = `${el.type}: ${getElementDescription(el)}`;
+                hoverLabel.style.left = (e.clientX + 10) + 'px';
+                hoverLabel.style.top = (e.clientY - 25) + 'px';
+                hoverLabel.style.display = 'block';
+            } else if (foundElement === null) {
+                hoveredElement = null;
+                hoverLabel.style.display = 'none';
+            }
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            hoverLabel.style.display = 'none';
+            hoveredElement = null;
+        });
+
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.round(e.clientX - rect.left);
+            const y = Math.round(e.clientY - rect.top);
+
+            // Check if clicking on existing element
+            for (let i = elements.length - 1; i >= 0; i--) {
+                const el = elements[i];
+                const w = el.w || 50;
+                const h = el.h || 20;
+                if (x >= el.x && x <= el.x + w && y >= el.y && y <= el.y + h) {
+                    selectElement(i);
+                    return;
+                }
+            }
+
+            // Otherwise, add new element if tool selected
+            if (currentTool) {
+                const element = createDefaultElement(currentTool, x, y);
+                elements.push(element);
+                redrawCanvas();
+                updateElementList();
+                updateJSON();
+            }
+        });
+
+        function createDefaultElement(type, x, y) {
+            const base = { type, x, y };
+
+            switch(type) {
+                case 'rect':
+                    return { ...base, w: 100, h: 50, color: 'FFFF', filled: false };
+                case 'line':
+                    return { ...base, w: 200, h: 1, color: '4A49' };
+                case 'text':
+                    return { ...base, size: 2, color: 'FFFF', label: 'Label' };
+                case 'temp':
+                    return { ...base, w: 100, h: 20, size: 2, color: '07FF', bgColor: '0000', 
+                             label: 'T:', data: 'temp0', decimals: 1, showLabel: true };
+                case 'coord':
+                    return { ...base, w: 120, h: 20, size: 2, color: 'FFFF', bgColor: '0000',
+                             label: 'X:', data: 'wposX', decimals: 2 };
+                case 'status':
+                    return { ...base, w: 150, h: 30, size: 3, bgColor: '0000', data: 'machineState' };
+                case 'dynamic':
+                    return { ...base, w: 100, h: 20, size: 2, color: 'FFFF', bgColor: '0000', data: 'feedRate' };
+            }
+        }
+
+        function redrawCanvas() {
+            ctx.fillStyle = rgb565ToRgb(document.getElementById('bgColor').value);
+            ctx.fillRect(0, 0, 480, 320);
+
+            // Draw grid
+            if (showGrid) {
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 0.5;
+                for(let i = 0; i <= 480; i += 10) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, 0);
+                    ctx.lineTo(i, 320);
+                    ctx.stroke();
+                }
+                for(let i = 0; i <= 320; i += 10) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, i);
+                    ctx.lineTo(480, i);
+                    ctx.stroke();
+                }
+            }
+
+            // Draw elements
+            elements.forEach((el, idx) => {
+                const isSelected = selectedElement === idx;
+                drawElement(el, isSelected, idx);
+            });
+        }
+
+        function drawElement(el, isSelected, idx) {
+            const color = rgb565ToRgb(el.color || 'FFFF');
+
+            switch(el.type) {
+                case 'rect':
+                    ctx.strokeStyle = color;
+                    ctx.fillStyle = color;
+                    ctx.lineWidth = 1;
+                    if (el.filled) {
+                        ctx.fillRect(el.x, el.y, el.w, el.h);
+                    } else {
+                        ctx.strokeRect(el.x, el.y, el.w, el.h);
+                    }
+                    break;
+                case 'line':
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = el.h || 1;
+                    ctx.beginPath();
+                    ctx.moveTo(el.x, el.y);
+                    ctx.lineTo(el.x + el.w, el.y);
+                    ctx.stroke();
+                    break;
+                case 'text':
+                case 'temp':
+                case 'coord':
+                case 'dynamic':
+                    ctx.fillStyle = rgb565ToRgb(el.bgColor || '0000');
+                    if (el.w && el.h) ctx.fillRect(el.x, el.y, el.w, el.h);
+                    ctx.fillStyle = color;
+                    ctx.font = `${el.size * 8}px monospace`;
+                    ctx.fillText(el.label || el.data || 'Text', el.x + 2, el.y + (el.size * 8) - 2);
+                    break;
+                case 'status':
+                    ctx.fillStyle = rgb565ToRgb(el.bgColor || '0000');
+                    ctx.fillRect(el.x, el.y, el.w, el.h);
+                    ctx.fillStyle = '#00FF00';
+                    ctx.font = `${el.size * 8}px monospace`;
+                    ctx.fillText('STATUS', el.x + 2, el.y + (el.size * 8) - 2);
+                    break;
+            }
+
+            // Draw index label if enabled
+            if (showLabels) {
+                ctx.fillStyle = 'rgba(0, 122, 204, 0.8)';
+                ctx.fillRect(el.x, el.y - 14, 20, 14);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '10px Arial';
+                ctx.fillText('#' + idx, el.x + 2, el.y - 4);
+            }
+
+            if (isSelected) {
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(el.x - 2, el.y - 2, (el.w || 50) + 4, (el.h || 20) + 4);
+            }
+        }
+
+        function updateElementList() {
+            const list = document.getElementById('elementList');
+            list.innerHTML = '';
+            elements.forEach((el, idx) => {
+                const div = document.createElement('div');
+                div.className = 'element-item' + (selectedElement === idx ? ' selected' : '');
+
+                const description = getElementDescription(el);
+
+                div.innerHTML = `
+                    <div class="element-info">
+                        <div class="element-type">#${idx} ${el.type}</div>
+                        <div class="element-description">${description}</div>
+                        <div class="element-coords">@ (${el.x}, ${el.y})</div>
+                    </div>
+                    <div class="element-actions">
+                        <button class="eye-btn" onclick="flashElement(${idx}); event.stopPropagation();" title="Flash on canvas">👁️</button>
+                        <button onclick="deleteElementByIndex(${idx}); event.stopPropagation();" title="Delete">×</button>
+                    </div>
+                `;
+                div.onclick = () => selectElement(idx);
+                list.appendChild(div);
+            });
+            document.getElementById('elementCount').textContent = elements.length;
+        }
+
+        function flashElement(idx) {
+            selectedElement = idx;
+            updateElementList();
+            redrawCanvas();
+
+            // Flash effect
+            let count = 0;
+            const interval = setInterval(() => {
+                if (count % 2 === 0) {
+                    selectedElement = null;
+                } else {
+                    selectedElement = idx;
+                }
+                redrawCanvas();
+                count++;
+                if (count >= 6) {
+                    clearInterval(interval);
+                    selectedElement = idx;
+                    redrawCanvas();
+                }
+            }, 200);
+        }
+
+        function selectElement(idx) {
+            selectedElement = idx;
+            showProperties(elements[idx]);
+            updateElementList();
+            redrawCanvas();
+        }
+
+        function showProperties(el) {
+            const panel = document.getElementById('propertiesPanel');
+            const inputs = document.getElementById('propertyInputs');
+            panel.style.display = 'block';
+
+            let html = '';
+
+            html += `<div class="input-group"><label>X Position</label><input type="number" id="prop_x" value="${el.x}"></div>`;
+            html += `<div class="input-group"><label>Y Position</label><input type="number" id="prop_y" value="${el.y}"></div>`;
+
+            if (el.w !== undefined) html += `<div class="input-group"><label>Width</label><input type="number" id="prop_w" value="${el.w}"></div>`;
+            if (el.h !== undefined) html += `<div class="input-group"><label>Height</label><input type="number" id="prop_h" value="${el.h}"></div>`;
+
+            if (el.color !== undefined) {
+                html += `<div class="input-group"><label>Color (RGB565)</label>
+                         <div class="color-input-group">
+                         <input type="text" id="prop_color" value="${el.color}" maxlength="4">
+                         <div class="color-preview" style="background: ${rgb565ToRgb(el.color)}"></div>
+                         </div></div>`;
+            }
+
+            if (el.bgColor !== undefined) {
+                html += `<div class="input-group"><label>Background Color</label>
+                         <div class="color-input-group">
+                         <input type="text" id="prop_bgColor" value="${el.bgColor}" maxlength="4">
+                         <div class="color-preview" style="background: ${rgb565ToRgb(el.bgColor)}"></div>
+                         </div></div>`;
+            }
+
+            if (el.size !== undefined) html += `<div class="input-group"><label>Font Size (1-3)</label><input type="number" id="prop_size" value="${el.size}" min="1" max="3"></div>`;
+            if (el.label !== undefined) html += `<div class="input-group"><label>Label Text</label><input type="text" id="prop_label" value="${el.label}"></div>`;
+            if (el.data !== undefined) {
+                html += `<div class="input-group"><label>Data Source</label><select id="prop_data">
+                         <option value="temp0" ${el.data === 'temp0' ? 'selected' : ''}>temp0</option>
+                         <option value="temp1" ${el.data === 'temp1' ? 'selected' : ''}>temp1</option>
+                         <option value="temp2" ${el.data === 'temp2' ? 'selected' : ''}>temp2</option>
+                         <option value="temp3" ${el.data === 'temp3' ? 'selected' : ''}>temp3</option>
+                         <option value="wposX" ${el.data === 'wposX' ? 'selected' : ''}>wposX</option>
+                         <option value="wposY" ${el.data === 'wposY' ? 'selected' : ''}>wposY</option>
+                         <option value="wposZ" ${el.data === 'wposZ' ? 'selected' : ''}>wposZ</option>
+                         <option value="machineState" ${el.data === 'machineState' ? 'selected' : ''}>machineState</option>
+                         <option value="feedRate" ${el.data === 'feedRate' ? 'selected' : ''}>feedRate</option>
+                         <option value="spindleRPM" ${el.data === 'spindleRPM' ? 'selected' : ''}>spindleRPM</option>
+                         </select></div>`;
+            }
+            if (el.decimals !== undefined) html += `<div class="input-group"><label>Decimal Places</label><input type="number" id="prop_decimals" value="${el.decimals}" min="0" max="3"></div>`;
+            if (el.filled !== undefined) html += `<div class="input-group"><div class="checkbox-group"><input type="checkbox" id="prop_filled" ${el.filled ? 'checked' : ''}><label>Filled</label></div></div>`;
+            if (el.showLabel !== undefined) html += `<div class="input-group"><div class="checkbox-group"><input type="checkbox" id="prop_showLabel" ${el.showLabel ? 'checked' : ''}><label>Show Label</label></div></div>`;
+
+            inputs.innerHTML = html;
+        }
+
+        function updateElement() {
+            if (selectedElement === null) return;
+            const el = elements[selectedElement];
+
+            if (document.getElementById('prop_x')) el.x = parseInt(document.getElementById('prop_x').value);
+            if (document.getElementById('prop_y')) el.y = parseInt(document.getElementById('prop_y').value);
+            if (document.getElementById('prop_w')) el.w = parseInt(document.getElementById('prop_w').value);
+            if (document.getElementById('prop_h')) el.h = parseInt(document.getElementById('prop_h').value);
+            if (document.getElementById('prop_color')) el.color = document.getElementById('prop_color').value;
+            if (document.getElementById('prop_bgColor')) el.bgColor = document.getElementById('prop_bgColor').value;
+            if (document.getElementById('prop_size')) el.size = parseInt(document.getElementById('prop_size').value);
+            if (document.getElementById('prop_label')) el.label = document.getElementById('prop_label').value;
+            if (document.getElementById('prop_data')) el.data = document.getElementById('prop_data').value;
+            if (document.getElementById('prop_decimals')) el.decimals = parseInt(document.getElementById('prop_decimals').value);
+            if (document.getElementById('prop_filled')) el.filled = document.getElementById('prop_filled').checked;
+            if (document.getElementById('prop_showLabel')) el.showLabel = document.getElementById('prop_showLabel').checked;
+
+            redrawCanvas();
+            updateElementList();
+            updateJSON();
+        }
+
+        function deleteElement() {
+            if (selectedElement === null) return;
+            elements.splice(selectedElement, 1);
+            selectedElement = null;
+            document.getElementById('propertiesPanel').style.display = 'none';
+            redrawCanvas();
+            updateElementList();
+            updateJSON();
+        }
+
+        function deleteElementByIndex(idx) {
+            elements.splice(idx, 1);
+            if (selectedElement === idx) {
+                selectedElement = null;
+                document.getElementById('propertiesPanel').style.display = 'none';
+            }
+            redrawCanvas();
+            updateElementList();
+            updateJSON();
+        }
+
+        function updateJSON() {
+            const json = {
+                name: document.getElementById('screenName').value,
+                background: document.getElementById('bgColor').value,
+                elements: elements
+            };
+            document.getElementById('jsonOutput').value = JSON.stringify(json, null, 2);
+            updateColorPreview('bgColor');
+        }
+
+        function updateColorPreview(id) {
+            const input = document.getElementById(id);
+            const preview = document.getElementById(id + 'Preview');
+            if (preview) preview.style.background = rgb565ToRgb(input.value);
+        }
+
+        function exportJSON() {
+            const text = document.getElementById('jsonOutput').value;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('✓ JSON copied to clipboard!');
+            });
+        }
+
+        function downloadJSON() {
+            const text = document.getElementById('jsonOutput').value;
+            const filename = document.getElementById('screenName').value.toLowerCase().replace(/\s+/g, '_') + '.json';
+            const blob = new Blob([text], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function clearAll() {
+            if (confirm('Clear all elements?')) {
+                elements = [];
+                selectedElement = null;
+                document.getElementById('propertiesPanel').style.display = 'none';
+                redrawCanvas();
+                updateElementList();
+                updateJSON();
+            }
+        }
+
+        // Initialize
+        redrawCanvas();
+        updateJSON();
+    </script>
+</body>
+</html>
