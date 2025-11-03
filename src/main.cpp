@@ -146,6 +146,451 @@ void IRAM_ATTR tachISR() {
 
 // JSON parsing, screen rendering, and display modes are now in display module
 
+// ============ WEB SERVER HTML TEMPLATES (PROGMEM) ============
+
+const char MAIN_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>FluidDash</title>
+  <style>
+    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #00bfff; }
+    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .status-item { padding: 10px; background: #333; border-radius: 5px; }
+    .status-label { color: #888; font-size: 12px; }
+    .status-value { font-size: 24px; font-weight: bold; color: #00bfff; }
+    .temp-ok { color: #00ff00; }
+    .temp-warn { color: #ffaa00; }
+    .temp-hot { color: #ff0000; }
+    button { background: #00bfff; color: #fff; border: none; padding: 12px 24px;
+             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
+    button:hover { background: #0099cc; }
+    .link-button { display: inline-block; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>🛡️ FluidDash</h1>
+
+    <div class='card'>
+      <h2>System Status</h2>
+      <div class='status-grid' id='status'>
+        <div class='status-item'>
+          <div class='status-label'>CNC Status</div>
+          <div class='status-value' id='cnc_status'>Loading...</div>
+        </div>
+        <div class='status-item'>
+          <div class='status-label'>Max Temperature</div>
+          <div class='status-value' id='max_temp'>--°C</div>
+        </div>
+        <div class='status-item'>
+          <div class='status-label'>Fan Speed</div>
+          <div class='status-value' id='fan_speed'>--%</div>
+        </div>
+        <div class='status-item'>
+          <div class='status-label'>PSU Voltage</div>
+          <div class='status-value' id='psu_volt'>--V</div>
+        </div>
+      </div>
+    </div>
+
+    <div class='card'>
+      <h2>Configuration</h2>
+      <a href='/settings' class='link-button'><button>⚙️ User Settings</button></a>
+      <a href='/admin' class='link-button'><button>🔧 Admin/Calibration</button></a>
+      <a href='/wifi' class='link-button'><button>📡 WiFi Setup</button></a>
+      <button onclick='restart()'>🔄 Restart Device</button>
+    </div>
+
+    <div class='card'>
+      <h2>Information</h2>
+      <p><strong>Device Name:</strong> %DEVICE_NAME%.local</p>
+      <p><strong>IP Address:</strong> %IP_ADDRESS%</p>
+      <p><strong>FluidNC:</strong> %FLUIDNC_IP%</p>
+      <p><strong>Version:</strong> v0.7</p>
+    </div>
+  </div>
+
+  <script>
+    function updateStatus() {
+      fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById('cnc_status').textContent = data.machine_state;
+
+          let maxTemp = Math.max(...data.temperatures);
+          let tempEl = document.getElementById('max_temp');
+          tempEl.textContent = maxTemp.toFixed(1) + '°C';
+          tempEl.className = 'status-value ' +
+            (maxTemp > 50 ? 'temp-hot' : maxTemp > 35 ? 'temp-warn' : 'temp-ok');
+
+          document.getElementById('fan_speed').textContent = data.fan_speed + '%';
+          document.getElementById('psu_volt').textContent = data.psu_voltage.toFixed(1) + 'V';
+        });
+    }
+
+    function restart() {
+      if (confirm('Restart device?')) {
+        fetch('/api/restart', {method: 'POST'})
+          .then(() => alert('Restarting... Reconnect in 30 seconds'));
+      }
+    }
+
+    function resetWiFi() {
+      if (confirm('Reset WiFi settings? Device will restart in AP mode.')) {
+        fetch('/api/reset-wifi', {method: 'POST'})
+          .then(() => alert('WiFi reset. Connect to FluidDash-Setup network.'));
+      }
+    }
+
+    updateStatus();
+    setInterval(updateStatus, 2000);
+  </script>
+</body>
+</html>
+)rawliteral";
+
+const char SETTINGS_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>Settings - FluidDash</title>
+  <style>
+    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1, h2 { color: #00bfff; }
+    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
+    label { display: block; margin: 15px 0 5px; color: #aaa; }
+    input, select { width: 100%; padding: 10px; background: #333; color: #fff;
+                    border: 1px solid #555; border-radius: 5px; box-sizing: border-box; }
+    button { background: #00bfff; color: #fff; border: none; padding: 12px 24px;
+             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px 0 0; }
+    button:hover { background: #0099cc; }
+    .back-btn { background: #666; }
+    .back-btn:hover { background: #555; }
+    .success { background: #00ff00; color: #000; padding: 10px; border-radius: 5px;
+               margin: 10px 0; display: none; }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>⚙️ User Settings</h1>
+
+    <form id='settingsForm'>
+      <div class='card'>
+        <h2>Temperature Control</h2>
+        <label>Low Threshold (°C) - Fan starts ramping up</label>
+        <input type='number' name='temp_low' value='%TEMP_LOW%' step='0.5' min='20' max='50'>
+
+        <label>High Threshold (°C) - Fan at 100%</label>
+        <input type='number' name='temp_high' value='%TEMP_HIGH%' step='0.5' min='30' max='80'>
+      </div>
+
+      <div class='card'>
+        <h2>Fan Control</h2>
+        <label>Minimum Fan Speed (%)</label>
+        <input type='number' name='fan_min' value='%FAN_MIN%' min='0' max='100'>
+      </div>
+
+      <div class='card'>
+        <h2>PSU Monitoring</h2>
+        <label>Low Voltage Alert (V)</label>
+        <input type='number' name='psu_low' value='%PSU_LOW%' step='0.1' min='18' max='24'>
+
+        <label>High Voltage Alert (V)</label>
+        <input type='number' name='psu_high' value='%PSU_HIGH%' step='0.1' min='24' max='30'>
+      </div>
+
+      <div class='card'>
+        <h2>Temperature Graph</h2>
+        <label>Graph Timespan (seconds)</label>
+        <select name='graph_time'>
+          <option value='60' %GRAPH_TIME_60%>1 minute</option>
+          <option value='300' %GRAPH_TIME_300%>5 minutes</option>
+          <option value='600' %GRAPH_TIME_600%>10 minutes</option>
+          <option value='1800' %GRAPH_TIME_1800%>30 minutes</option>
+          <option value='3600' %GRAPH_TIME_3600%>60 minutes</option>
+        </select>
+
+        <label>Update Interval (seconds)</label>
+        <select name='graph_interval'>
+          <option value='1' %GRAPH_INT_1%>1 second</option>
+          <option value='5' %GRAPH_INT_5%>5 seconds</option>
+          <option value='10' %GRAPH_INT_10%>10 seconds</option>
+          <option value='30' %GRAPH_INT_30%>30 seconds</option>
+          <option value='60' %GRAPH_INT_60%>60 seconds</option>
+        </select>
+      </div>
+
+      <div class='card'>
+        <h2>Display</h2>
+        <label>Coordinate Decimal Places</label>
+        <select name='coord_decimals'>
+          <option value='2' %COORD_DEC_2%>2 decimals (0.00)</option>
+          <option value='3' %COORD_DEC_3%>3 decimals (0.000)</option>
+        </select>
+      </div>
+
+      <div class='success' id='success'>Settings saved successfully!</div>
+
+      <button type='submit'>💾 Save Settings</button>
+      <button type='button' class='back-btn' onclick='location.href="/"'>← Back</button>
+    </form>
+  </div>
+
+  <script>
+    document.getElementById('settingsForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      let formData = new FormData(this);
+
+      fetch('/api/save', {
+        method: 'POST',
+        body: new URLSearchParams(formData)
+      })
+      .then(r => r.text())
+      .then(msg => {
+        document.getElementById('success').style.display = 'block';
+        setTimeout(() => {
+          document.getElementById('success').style.display = 'none';
+        }, 3000);
+      });
+    });
+  </script>
+</body>
+</html>
+)rawliteral";
+
+const char ADMIN_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>Admin - FluidDash</title>
+  <style>
+    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1, h2 { color: #ff6600; }
+    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
+    .warning { background: #ff6600; color: #000; padding: 15px; border-radius: 5px;
+               margin: 15px 0; font-weight: bold; }
+    label { display: block; margin: 15px 0 5px; color: #aaa; }
+    input { width: 100%; padding: 10px; background: #333; color: #fff;
+            border: 1px solid #555; border-radius: 5px; box-sizing: border-box; }
+    button { background: #ff6600; color: #fff; border: none; padding: 12px 24px;
+             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px 0 0; }
+    button:hover { background: #cc5200; }
+    .back-btn { background: #666; }
+    .back-btn:hover { background: #555; }
+    .success { background: #00ff00; color: #000; padding: 10px; border-radius: 5px;
+               margin: 10px 0; display: none; }
+    .current-reading { color: #00bfff; font-size: 18px; margin: 5px 0; }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>🔧 Admin & Calibration</h1>
+
+    <div class='warning'>
+      ⚠️ Warning: These settings affect measurement accuracy.
+      Only change if you have calibration equipment.
+    </div>
+
+    <div class='card'>
+      <h2>Current Readings (Uncalibrated)</h2>
+      <div id='readings'>Loading...</div>
+    </div>
+
+    <form id='adminForm'>
+      <div class='card'>
+        <h2>Temperature Calibration</h2>
+        <p style='color:#aaa'>Enter offset to add/subtract from each sensor</p>
+
+        <label>X-Axis Offset (°C)</label>
+        <input type='number' name='cal_x' value='%CAL_X%' step='0.1'>
+
+        <label>YL-Axis Offset (°C)</label>
+        <input type='number' name='cal_yl' value='%CAL_YL%' step='0.1'>
+
+        <label>YR-Axis Offset (°C)</label>
+        <input type='number' name='cal_yr' value='%CAL_YR%' step='0.1'>
+
+        <label>Z-Axis Offset (°C)</label>
+        <input type='number' name='cal_z' value='%CAL_Z%' step='0.1'>
+      </div>
+
+      <div class='card'>
+        <h2>PSU Voltage Calibration</h2>
+        <p style='color:#aaa'>Voltage divider multiplier (measure with multimeter)</p>
+
+        <label>Calibration Factor</label>
+        <input type='number' name='psu_cal' value='%PSU_CAL%' step='0.01' min='5' max='10'>
+      </div>
+
+      <div class='success' id='success'>Calibration saved successfully!</div>
+
+      <button type='submit'>💾 Save Calibration</button>
+      <button type='button' class='back-btn' onclick='location.href="/"'>← Back</button>
+    </form>
+  </div>
+
+  <script>
+    function updateReadings() {
+      fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+          let html = '';
+          ['X', 'YL', 'YR', 'Z'].forEach((name, i) => {
+            html += `<div class='current-reading'>${name}: ${data.temperatures[i].toFixed(2)}°C</div>`;
+          });
+          html += `<div class='current-reading'>PSU: ${data.psu_voltage.toFixed(2)}V</div>`;
+          document.getElementById('readings').innerHTML = html;
+        });
+    }
+
+    document.getElementById('adminForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      let formData = new FormData(this);
+
+      fetch('/api/admin/save', {
+        method: 'POST',
+        body: new URLSearchParams(formData)
+      })
+      .then(r => r.text())
+      .then(msg => {
+        document.getElementById('success').style.display = 'block';
+        setTimeout(() => {
+          document.getElementById('success').style.display = 'none';
+        }, 3000);
+      });
+    });
+
+    updateReadings();
+    setInterval(updateReadings, 2000);
+  </script>
+</body>
+</html>
+)rawliteral";
+
+const char WIFI_CONFIG_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>WiFi Setup - FluidDash</title>
+  <style>
+    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1 { color: #00bfff; }
+    h2 { color: #00ff00; }
+    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
+    .status { padding: 15px; border-radius: 5px; margin: 15px 0; font-weight: bold; }
+    .status-connected { background: #00ff00; color: #000; }
+    .status-ap { background: #ff9900; color: #000; }
+    .status-disconnected { background: #ff0000; color: #fff; }
+    label { display: block; margin: 15px 0 5px; color: #aaa; }
+    input, select { width: 100%; padding: 10px; background: #333; color: #fff;
+            border: 1px solid #555; border-radius: 5px; box-sizing: border-box;
+            font-size: 16px; }
+    button { background: #00bfff; color: #fff; border: none; padding: 12px 24px;
+             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px 0 0; }
+    button:hover { background: #0099cc; }
+    .back-btn { background: #666; }
+    .back-btn:hover { background: #555; }
+    .message { padding: 10px; border-radius: 5px; margin: 10px 0; display: none; }
+    .success { background: #00ff00; color: #000; }
+    .error { background: #ff0000; color: #fff; }
+    #password { -webkit-text-security: disc; }
+    .info-box { background: #1a3a5a; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #00bfff; }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>📡 WiFi Configuration</h1>
+
+%WIFI_STATUS%
+
+    <div class='info-box'>
+      <strong>ℹ️ Manual WiFi Configuration</strong><br>
+      Enter your WiFi network name (SSID) and password below. The device will restart and attempt to connect.
+    </div>
+
+    <form id='wifiForm'>
+      <div class='card'>
+        <h2>WiFi Credentials</h2>
+
+        <label>Network Name (SSID)</label>
+        <input type='text' id='ssid' name='ssid' value='%CURRENT_SSID%' required
+               placeholder='Enter WiFi network name'>
+
+        <label>Password</label>
+        <input type='password' id='password' name='password' required
+               placeholder='Enter WiFi password'>
+
+        <div class='message' id='message'></div>
+
+        <button type='submit'>💾 Save & Connect</button>
+        <button type='button' class='back-btn' onclick='location.href="/"'>← Back</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+
+    document.getElementById('wifiForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      let ssid = document.getElementById('ssid').value;
+      let password = document.getElementById('password').value;
+      let msgDiv = document.getElementById('message');
+
+      msgDiv.style.display = 'block';
+      msgDiv.className = 'message';
+      msgDiv.textContent = 'Connecting to ' + ssid + '...';
+
+      let formData = new FormData();
+      formData.append('ssid', ssid);
+      formData.append('password', password);
+
+      fetch('/api/wifi/connect', {
+        method: 'POST',
+        body: new URLSearchParams(formData)
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          msgDiv.className = 'message success';
+          msgDiv.innerHTML = '✅ Connected successfully!<br>Device will restart in 3 seconds...';
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 3000);
+        } else {
+          msgDiv.className = 'message error';
+          msgDiv.textContent = '❌ Connection failed: ' + data.message;
+        }
+      })
+      .catch(err => {
+        msgDiv.className = 'message error';
+        msgDiv.textContent = '❌ Request failed. Check connection.';
+      });
+    });
+  </script>
+</body>
+</html>
+)rawliteral";
+
+// ============ WEB SERVER FUNCTIONS ============
+
 void setup() {
   Serial.begin(115200);
   Serial.println("FluidDash - Starting...");
@@ -763,363 +1208,64 @@ server.on("/editor", HTTP_GET, [](AsyncWebServerRequest *request){
 // Current implementation is acceptable for occasional web interface access.
 
 String getMainHTML() {
-  // Reserve memory upfront to reduce fragmentation
-  String html;
-  html.reserve(4096);
-  html = R"(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <title>FluidDash</title>
-  <style>
-    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
-    .container { max-width: 800px; margin: 0 auto; }
-    h1 { color: #00bfff; }
-    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
-    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-    .status-item { padding: 10px; background: #333; border-radius: 5px; }
-    .status-label { color: #888; font-size: 12px; }
-    .status-value { font-size: 24px; font-weight: bold; color: #00bfff; }
-    .temp-ok { color: #00ff00; }
-    .temp-warn { color: #ffaa00; }
-    .temp-hot { color: #ff0000; }
-    button { background: #00bfff; color: #fff; border: none; padding: 12px 24px; 
-             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
-    button:hover { background: #0099cc; }
-    .link-button { display: inline-block; text-decoration: none; }
-  </style>
-</head>
-<body>
-  <div class='container'>
-    <h1>🛡️ FluidDash</h1>
-    
-    <div class='card'>
-      <h2>System Status</h2>
-      <div class='status-grid' id='status'>
-        <div class='status-item'>
-          <div class='status-label'>CNC Status</div>
-          <div class='status-value' id='cnc_status'>Loading...</div>
-        </div>
-        <div class='status-item'>
-          <div class='status-label'>Max Temperature</div>
-          <div class='status-value' id='max_temp'>--°C</div>
-        </div>
-        <div class='status-item'>
-          <div class='status-label'>Fan Speed</div>
-          <div class='status-value' id='fan_speed'>--%</div>
-        </div>
-        <div class='status-item'>
-          <div class='status-label'>PSU Voltage</div>
-          <div class='status-value' id='psu_volt'>--V</div>
-        </div>
-      </div>
-    </div>
-    
-    <div class='card'>
-      <h2>Configuration</h2>
-      <a href='/settings' class='link-button'><button>⚙️ User Settings</button></a>
-      <a href='/admin' class='link-button'><button>🔧 Admin/Calibration</button></a>
-      <a href='/wifi' class='link-button'><button>📡 WiFi Setup</button></a>
-      <button onclick='restart()'>🔄 Restart Device</button>
-    </div>
-    
-    <div class='card'>
-      <h2>Information</h2>
-      <p><strong>Device Name:</strong> )";
-  html += cfg.device_name;
-  html += R"(.local</p>
-      <p><strong>IP Address:</strong> )";
-  html += WiFi.localIP().toString();
-  html += R"(</p>
-      <p><strong>FluidNC:</strong> )";
-  html += cfg.fluidnc_ip;
-  html += R"(</p>
-      <p><strong>Version:</strong> v0.7</p>
-    </div>
-  </div>
-  
-  <script>
-    function updateStatus() {
-      fetch('/api/status')
-        .then(r => r.json())
-        .then(data => {
-          document.getElementById('cnc_status').textContent = data.machine_state;
-          
-          let maxTemp = Math.max(...data.temperatures);
-          let tempEl = document.getElementById('max_temp');
-          tempEl.textContent = maxTemp.toFixed(1) + '°C';
-          tempEl.className = 'status-value ' + 
-            (maxTemp > 50 ? 'temp-hot' : maxTemp > 35 ? 'temp-warn' : 'temp-ok');
-          
-          document.getElementById('fan_speed').textContent = data.fan_speed + '%';
-          document.getElementById('psu_volt').textContent = data.psu_voltage.toFixed(1) + 'V';
-        });
-    }
-    
-    function restart() {
-      if (confirm('Restart device?')) {
-        fetch('/api/restart', {method: 'POST'})
-          .then(() => alert('Restarting... Reconnect in 30 seconds'));
-      }
-    }
-    
-    function resetWiFi() {
-      if (confirm('Reset WiFi settings? Device will restart in AP mode.')) {
-        fetch('/api/reset-wifi', {method: 'POST'})
-          .then(() => alert('WiFi reset. Connect to FluidDash-Setup network.'));
-      }
-    }
-    
-    updateStatus();
-    setInterval(updateStatus, 2000);
-  </script>
-</body>
-</html>
-)";
+  String html = String(FPSTR(MAIN_HTML));
+
+  // Replace all placeholders with dynamic content
+  html.replace("%DEVICE_NAME%", cfg.device_name);
+  html.replace("%IP_ADDRESS%", WiFi.localIP().toString());
+  html.replace("%FLUIDNC_IP%", cfg.fluidnc_ip);
+
   return html;
 }
 
 String getSettingsHTML() {
-  String html;
-  html.reserve(5120);
-  html = R"(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <title>Settings - FluidDash</title>
-  <style>
-    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
-    .container { max-width: 600px; margin: 0 auto; }
-    h1, h2 { color: #00bfff; }
-    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
-    label { display: block; margin: 15px 0 5px; color: #aaa; }
-    input, select { width: 100%; padding: 10px; background: #333; color: #fff; 
-                    border: 1px solid #555; border-radius: 5px; box-sizing: border-box; }
-    button { background: #00bfff; color: #fff; border: none; padding: 12px 24px; 
-             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px 0 0; }
-    button:hover { background: #0099cc; }
-    .back-btn { background: #666; }
-    .back-btn:hover { background: #555; }
-    .success { background: #00ff00; color: #000; padding: 10px; border-radius: 5px; 
-               margin: 10px 0; display: none; }
-  </style>
-</head>
-<body>
-  <div class='container'>
-    <h1>⚙️ User Settings</h1>
-    
-    <form id='settingsForm'>
-      <div class='card'>
-        <h2>Temperature Control</h2>
-        <label>Low Threshold (°C) - Fan starts ramping up</label>
-        <input type='number' name='temp_low' value=')" + String(cfg.temp_threshold_low) + R"(' step='0.5' min='20' max='50'>
-        
-        <label>High Threshold (°C) - Fan at 100%</label>
-        <input type='number' name='temp_high' value=')" + String(cfg.temp_threshold_high) + R"(' step='0.5' min='30' max='80'>
-      </div>
-      
-      <div class='card'>
-        <h2>Fan Control</h2>
-        <label>Minimum Fan Speed (%)</label>
-        <input type='number' name='fan_min' value=')" + String(cfg.fan_min_speed) + R"(' min='0' max='100'>
-      </div>
-      
-      <div class='card'>
-        <h2>PSU Monitoring</h2>
-        <label>Low Voltage Alert (V)</label>
-        <input type='number' name='psu_low' value=')" + String(cfg.psu_alert_low) + R"(' step='0.1' min='18' max='24'>
-        
-        <label>High Voltage Alert (V)</label>
-        <input type='number' name='psu_high' value=')" + String(cfg.psu_alert_high) + R"(' step='0.1' min='24' max='30'>
-      </div>
-      
-      <div class='card'>
-        <h2>Temperature Graph</h2>
-        <label>Graph Timespan (seconds)</label>
-        <select name='graph_time'>
-          <option value='60' )" + String(cfg.graph_timespan_seconds == 60 ? "selected" : "") + R"(>1 minute</option>
-          <option value='300' )" + String(cfg.graph_timespan_seconds == 300 ? "selected" : "") + R"(>5 minutes</option>
-          <option value='600' )" + String(cfg.graph_timespan_seconds == 600 ? "selected" : "") + R"(>10 minutes</option>
-          <option value='1800' )" + String(cfg.graph_timespan_seconds == 1800 ? "selected" : "") + R"(>30 minutes</option>
-          <option value='3600' )" + String(cfg.graph_timespan_seconds == 3600 ? "selected" : "") + R"(>60 minutes</option>
-        </select>
-        
-        <label>Update Interval (seconds)</label>
-        <select name='graph_interval'>
-          <option value='1' )" + String(cfg.graph_update_interval == 1 ? "selected" : "") + R"(>1 second</option>
-          <option value='5' )" + String(cfg.graph_update_interval == 5 ? "selected" : "") + R"(>5 seconds</option>
-          <option value='10' )" + String(cfg.graph_update_interval == 10 ? "selected" : "") + R"(>10 seconds</option>
-          <option value='30' )" + String(cfg.graph_update_interval == 30 ? "selected" : "") + R"(>30 seconds</option>
-          <option value='60' )" + String(cfg.graph_update_interval == 60 ? "selected" : "") + R"(>60 seconds</option>
-        </select>
-      </div>
-      
-      <div class='card'>
-        <h2>Display</h2>
-        <label>Coordinate Decimal Places</label>
-        <select name='coord_decimals'>
-          <option value='2' )" + String(cfg.coord_decimal_places == 2 ? "selected" : "") + R"(>2 decimals (0.00)</option>
-          <option value='3' )" + String(cfg.coord_decimal_places == 3 ? "selected" : "") + R"(>3 decimals (0.000)</option>
-        </select>
-      </div>
-      
-      <div class='success' id='success'>Settings saved successfully!</div>
-      
-      <button type='submit'>💾 Save Settings</button>
-      <button type='button' class='back-btn' onclick='location.href="/"'>← Back</button>
-    </form>
-  </div>
-  
-  <script>
-    document.getElementById('settingsForm').addEventListener('submit', function(e) {
-      e.preventDefault();
-      
-      let formData = new FormData(this);
-      
-      fetch('/api/save', {
-        method: 'POST',
-        body: new URLSearchParams(formData)
-      })
-      .then(r => r.text())
-      .then(msg => {
-        document.getElementById('success').style.display = 'block';
-        setTimeout(() => {
-          document.getElementById('success').style.display = 'none';
-        }, 3000);
-      });
-    });
-  </script>
-</body>
-</html>
-)";
+  String html = String(FPSTR(SETTINGS_HTML));
+
+  // Replace numeric input values
+  html.replace("%TEMP_LOW%", String(cfg.temp_threshold_low));
+  html.replace("%TEMP_HIGH%", String(cfg.temp_threshold_high));
+  html.replace("%FAN_MIN%", String(cfg.fan_min_speed));
+  html.replace("%PSU_LOW%", String(cfg.psu_alert_low));
+  html.replace("%PSU_HIGH%", String(cfg.psu_alert_high));
+
+  // Replace graph timespan selected options
+  html.replace("%GRAPH_TIME_60%", cfg.graph_timespan_seconds == 60 ? "selected" : "");
+  html.replace("%GRAPH_TIME_300%", cfg.graph_timespan_seconds == 300 ? "selected" : "");
+  html.replace("%GRAPH_TIME_600%", cfg.graph_timespan_seconds == 600 ? "selected" : "");
+  html.replace("%GRAPH_TIME_1800%", cfg.graph_timespan_seconds == 1800 ? "selected" : "");
+  html.replace("%GRAPH_TIME_3600%", cfg.graph_timespan_seconds == 3600 ? "selected" : "");
+
+  // Replace graph interval selected options
+  html.replace("%GRAPH_INT_1%", cfg.graph_update_interval == 1 ? "selected" : "");
+  html.replace("%GRAPH_INT_5%", cfg.graph_update_interval == 5 ? "selected" : "");
+  html.replace("%GRAPH_INT_10%", cfg.graph_update_interval == 10 ? "selected" : "");
+  html.replace("%GRAPH_INT_30%", cfg.graph_update_interval == 30 ? "selected" : "");
+  html.replace("%GRAPH_INT_60%", cfg.graph_update_interval == 60 ? "selected" : "");
+
+  // Replace coordinate decimal places selected options
+  html.replace("%COORD_DEC_2%", cfg.coord_decimal_places == 2 ? "selected" : "");
+  html.replace("%COORD_DEC_3%", cfg.coord_decimal_places == 3 ? "selected" : "");
+
   return html;
 }
 
 String getAdminHTML() {
-  String html;
-  html.reserve(5120);
-  html = R"(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <title>Admin - FluidDash</title>
-  <style>
-    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
-    .container { max-width: 600px; margin: 0 auto; }
-    h1, h2 { color: #ff6600; }
-    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
-    .warning { background: #ff6600; color: #000; padding: 15px; border-radius: 5px; 
-               margin: 15px 0; font-weight: bold; }
-    label { display: block; margin: 15px 0 5px; color: #aaa; }
-    input { width: 100%; padding: 10px; background: #333; color: #fff; 
-            border: 1px solid #555; border-radius: 5px; box-sizing: border-box; }
-    button { background: #ff6600; color: #fff; border: none; padding: 12px 24px; 
-             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px 0 0; }
-    button:hover { background: #cc5200; }
-    .back-btn { background: #666; }
-    .back-btn:hover { background: #555; }
-    .success { background: #00ff00; color: #000; padding: 10px; border-radius: 5px; 
-               margin: 10px 0; display: none; }
-    .current-reading { color: #00bfff; font-size: 18px; margin: 5px 0; }
-  </style>
-</head>
-<body>
-  <div class='container'>
-    <h1>🔧 Admin & Calibration</h1>
-    
-    <div class='warning'>
-      ⚠️ Warning: These settings affect measurement accuracy. 
-      Only change if you have calibration equipment.
-    </div>
-    
-    <div class='card'>
-      <h2>Current Readings (Uncalibrated)</h2>
-      <div id='readings'>Loading...</div>
-    </div>
-    
-    <form id='adminForm'>
-      <div class='card'>
-        <h2>Temperature Calibration</h2>
-        <p style='color:#aaa'>Enter offset to add/subtract from each sensor</p>
-        
-        <label>X-Axis Offset (°C)</label>
-        <input type='number' name='cal_x' value=')" + String(cfg.temp_offset_x, 2) + R"(' step='0.1'>
-        
-        <label>YL-Axis Offset (°C)</label>
-        <input type='number' name='cal_yl' value=')" + String(cfg.temp_offset_yl, 2) + R"(' step='0.1'>
-        
-        <label>YR-Axis Offset (°C)</label>
-        <input type='number' name='cal_yr' value=')" + String(cfg.temp_offset_yr, 2) + R"(' step='0.1'>
-        
-        <label>Z-Axis Offset (°C)</label>
-        <input type='number' name='cal_z' value=')" + String(cfg.temp_offset_z, 2) + R"(' step='0.1'>
-      </div>
-      
-      <div class='card'>
-        <h2>PSU Voltage Calibration</h2>
-        <p style='color:#aaa'>Voltage divider multiplier (measure with multimeter)</p>
-        
-        <label>Calibration Factor</label>
-        <input type='number' name='psu_cal' value=')" + String(cfg.psu_voltage_cal, 3) + R"(' step='0.01' min='5' max='10'>
-      </div>
-      
-      <div class='success' id='success'>Calibration saved successfully!</div>
-      
-      <button type='submit'>💾 Save Calibration</button>
-      <button type='button' class='back-btn' onclick='location.href="/"'>← Back</button>
-    </form>
-  </div>
-  
-  <script>
-    function updateReadings() {
-      fetch('/api/status')
-        .then(r => r.json())
-        .then(data => {
-          let html = '';
-          ['X', 'YL', 'YR', 'Z'].forEach((name, i) => {
-            html += `<div class='current-reading'>${name}: ${data.temperatures[i].toFixed(2)}°C</div>`;
-          });
-          html += `<div class='current-reading'>PSU: ${data.psu_voltage.toFixed(2)}V</div>`;
-          document.getElementById('readings').innerHTML = html;
-        });
-    }
-    
-    document.getElementById('adminForm').addEventListener('submit', function(e) {
-      e.preventDefault();
-      
-      let formData = new FormData(this);
-      
-      fetch('/api/admin/save', {
-        method: 'POST',
-        body: new URLSearchParams(formData)
-      })
-      .then(r => r.text())
-      .then(msg => {
-        document.getElementById('success').style.display = 'block';
-        setTimeout(() => {
-          document.getElementById('success').style.display = 'none';
-        }, 3000);
-      });
-    });
-    
-    updateReadings();
-    setInterval(updateReadings, 2000);
-  </script>
-</body>
-</html>
-)";
+  String html = String(FPSTR(ADMIN_HTML));
+
+  // Replace calibration offset values (with 2 decimal places for temp)
+  html.replace("%CAL_X%", String(cfg.temp_offset_x, 2));
+  html.replace("%CAL_YL%", String(cfg.temp_offset_yl, 2));
+  html.replace("%CAL_YR%", String(cfg.temp_offset_yr, 2));
+  html.replace("%CAL_Z%", String(cfg.temp_offset_z, 2));
+
+  // Replace PSU calibration value (with 3 decimal places)
+  html.replace("%PSU_CAL%", String(cfg.psu_voltage_cal, 3));
+
   return html;
 }
 
 String getWiFiConfigHTML() {
-  String html;
-  html.reserve(5120);
+  String html = String(FPSTR(WIFI_CONFIG_HTML));
 
   // Get current WiFi status
   String currentSSID = WiFi.SSID();
@@ -1127,125 +1273,20 @@ String getWiFiConfigHTML() {
   bool isConnected = (WiFi.status() == WL_CONNECTED);
   bool isAPMode = inAPMode;
 
-  html = R"(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <meta name='viewport' content='width=device-width, initial-scale=1'>
-  <title>WiFi Setup - FluidDash</title>
-  <style>
-    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
-    .container { max-width: 600px; margin: 0 auto; }
-    h1 { color: #00bfff; }
-    h2 { color: #00ff00; }
-    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
-    .status { padding: 15px; border-radius: 5px; margin: 15px 0; font-weight: bold; }
-    .status-connected { background: #00ff00; color: #000; }
-    .status-ap { background: #ff9900; color: #000; }
-    .status-disconnected { background: #ff0000; color: #fff; }
-    label { display: block; margin: 15px 0 5px; color: #aaa; }
-    input, select { width: 100%; padding: 10px; background: #333; color: #fff;
-            border: 1px solid #555; border-radius: 5px; box-sizing: border-box;
-            font-size: 16px; }
-    button { background: #00bfff; color: #fff; border: none; padding: 12px 24px;
-             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px 0 0; }
-    button:hover { background: #0099cc; }
-    .back-btn { background: #666; }
-    .back-btn:hover { background: #555; }
-    .message { padding: 10px; border-radius: 5px; margin: 10px 0; display: none; }
-    .success { background: #00ff00; color: #000; }
-    .error { background: #ff0000; color: #fff; }
-    #password { -webkit-text-security: disc; }
-    .info-box { background: #1a3a5a; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #00bfff; }
-  </style>
-</head>
-<body>
-  <div class='container'>
-    <h1>📡 WiFi Configuration</h1>
-
-)";
-
-  // Add current status
-  html += "<div class='status ";
+  // Build WiFi status section
+  String wifiStatus = "<div class='status ";
   if (isAPMode) {
-    html += "status-ap'>🔧 AP Mode Active - Configure WiFi to connect to your network</div>";
+    wifiStatus += "status-ap'>🔧 AP Mode Active - Configure WiFi to connect to your network</div>";
   } else if (isConnected) {
-    html += "status-connected'>✅ Connected to: " + currentSSID + "<br>IP: " + currentIP + "</div>";
+    wifiStatus += "status-connected'>✅ Connected to: " + currentSSID + "<br>IP: " + currentIP + "</div>";
   } else {
-    html += "status-disconnected'>❌ Not Connected - Configure WiFi below</div>";
+    wifiStatus += "status-disconnected'>❌ Not Connected - Configure WiFi below</div>";
   }
 
-  html += R"(
+  // Replace placeholders
+  html.replace("%WIFI_STATUS%", wifiStatus);
+  html.replace("%CURRENT_SSID%", currentSSID);
 
-    <div class='info-box'>
-      <strong>ℹ️ Manual WiFi Configuration</strong><br>
-      Enter your WiFi network name (SSID) and password below. The device will restart and attempt to connect.
-    </div>
-
-    <form id='wifiForm'>
-      <div class='card'>
-        <h2>WiFi Credentials</h2>
-
-        <label>Network Name (SSID)</label>
-        <input type='text' id='ssid' name='ssid' value=')" + currentSSID + R"(' required
-               placeholder='Enter WiFi network name'>
-
-        <label>Password</label>
-        <input type='password' id='password' name='password' required
-               placeholder='Enter WiFi password'>
-
-        <div class='message' id='message'></div>
-
-        <button type='submit'>💾 Save & Connect</button>
-        <button type='button' class='back-btn' onclick='location.href="/"'>← Back</button>
-      </div>
-    </form>
-  </div>
-
-  <script>
-
-    document.getElementById('wifiForm').addEventListener('submit', function(e) {
-      e.preventDefault();
-
-      let ssid = document.getElementById('ssid').value;
-      let password = document.getElementById('password').value;
-      let msgDiv = document.getElementById('message');
-
-      msgDiv.style.display = 'block';
-      msgDiv.className = 'message';
-      msgDiv.textContent = 'Connecting to ' + ssid + '...';
-
-      let formData = new FormData();
-      formData.append('ssid', ssid);
-      formData.append('password', password);
-
-      fetch('/api/wifi/connect', {
-        method: 'POST',
-        body: new URLSearchParams(formData)
-      })
-      .then(r => r.json())
-      .then(data => {
-        if (data.success) {
-          msgDiv.className = 'message success';
-          msgDiv.innerHTML = '✅ Connected successfully!<br>Device will restart in 3 seconds...';
-          setTimeout(() => {
-            window.location.href = '/';
-          }, 3000);
-        } else {
-          msgDiv.className = 'message error';
-          msgDiv.textContent = '❌ Connection failed: ' + data.message;
-        }
-      })
-      .catch(err => {
-        msgDiv.className = 'message error';
-        msgDiv.textContent = '❌ Request failed. Check connection.';
-      });
-    });
-  </script>
-</body>
-</html>
-)";
   return html;
 }
 
