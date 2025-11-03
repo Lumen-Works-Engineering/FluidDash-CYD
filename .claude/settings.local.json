@@ -12,7 +12,8 @@
       "Bash(timeout /t 3)",
       "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run)",
       "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" device monitor --port COM9)",
-      "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run --target upload)"
+      "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run --target upload)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []
