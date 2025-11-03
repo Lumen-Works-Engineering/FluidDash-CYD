@@ -17,8 +17,6 @@
 #if __has_include(<WebSocketsClient.h>)
 #include <WebSocketsClient.h>
 #else
-// Minimal stub for WebSocketsClient to allow compilation when the library is not installed.
-// This stub implements only the parts used by this project (no actual network functionality).
 enum WStype_t {
   WStype_DISCONNECTED,
   WStype_CONNECTED,
@@ -286,6 +284,21 @@ bool fluidncConnected = false;
 unsigned long jobStartTime = 0;
 bool isJobRunning = false;
 
+// ===== ADD NEW GLOBAL VARIABLES HERE =====
+// Extended status fields
+int feedOverride = 100;
+int rapidOverride = 100;
+int spindleOverride = 100;
+float wcoX = 0, wcoY = 0, wcoZ = 0, wcoA = 0;
+
+// WebSocket reporting
+bool autoReportingEnabled = false;
+unsigned long reportingSetupTime = 0;
+
+// Debug control
+bool debugWebSocket = false;  // Set to true only when debugging
+// ===== END NEW GLOBAL VARIABLES =====
+
 // WiFi AP mode flag
 bool inAPMode = false;
 
@@ -529,15 +542,28 @@ void loop() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    webSocket.loop();
-
-    if (millis() - lastStatusRequest >= cfg.status_update_rate && fluidncConnected) {
-      if (!webSocket.sendTXT("?\n")) {
-        Serial.println("[FluidNC] Warning: Failed to send status request");
+      webSocket.loop();
+      
+      // Always poll for status - FluidNC doesn't have automatic reporting
+      if (fluidncConnected && (millis() - lastStatusRequest >= cfg.status_update_rate)) {
+          if (debugWebSocket) {
+              Serial.println("[FluidNC] Sending status request");
+          }
+          webSocket.sendTXT("?");
+          lastStatusRequest = millis();
       }
-      lastStatusRequest = millis();
-    }
+      
+      // Periodic debug output (only every 10 seconds now)
+      static unsigned long lastDebug = 0;
+      if (debugWebSocket && millis() - lastDebug >= 10000) {
+          Serial.printf("[DEBUG] State:%s MPos:(%.2f,%.2f,%.2f,%.2f) WPos:(%.2f,%.2f,%.2f,%.2f)\n", 
+                        machineState.c_str(), 
+                        posX, posY, posZ, posA,
+                        wposX, wposY, wposZ, wposA);
+          lastDebug = millis();
+      }
   }
+
 
   if (millis() - lastDisplayUpdate >= 1000) {
     updateDisplay();
@@ -1373,11 +1399,12 @@ String getStatusJSON() {
 // ========== FluidNC Connection ==========
 
 void connectFluidNC() {
-  Serial.printf("[FluidNC] Attempting to connect to ws://%s:%d/ws\n", cfg.fluidnc_ip, cfg.fluidnc_port);
-  webSocket.begin(cfg.fluidnc_ip, cfg.fluidnc_port, "/ws");
-  webSocket.onEvent(fluidNCWebSocketEvent);
-  webSocket.setReconnectInterval(5000);
-  Serial.println("[FluidNC] WebSocket initialized, waiting for connection...");
+    Serial.printf("[FluidNC] Attempting to connect to ws://%s:%d/ws\n", 
+                  cfg.fluidnc_ip, cfg.fluidnc_port);
+    webSocket.begin(cfg.fluidnc_ip, cfg.fluidnc_port, "/ws");  // Add /ws path
+    webSocket.onEvent(fluidNCWebSocketEvent);
+    webSocket.setReconnectInterval(5000);
+    Serial.println("[FluidNC] WebSocket initialized, waiting for connection...");
 }
 
 void discoverFluidNC() {
@@ -1402,89 +1429,203 @@ void discoverFluidNC() {
 }
 
 void fluidNCWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
-    case WStype_DISCONNECTED:
-      Serial.println("[FluidNC] Disconnected");
-      fluidncConnected = false;
-      machineState = "OFFLINE";
-      break;
+    switch(type) {
+        case WStype_DISCONNECTED:
+            Serial.println("[FluidNC] Disconnected!");
+            fluidncConnected = false;
+            machineState = "OFFLINE";
+            break;
+            
+        case WStype_CONNECTED:
+            Serial.printf("[FluidNC] Connected to: %s\n", payload);
+            fluidncConnected = true;
+            machineState = "IDLE";
+            
+            // DON'T send ReportInterval - FluidNC doesn't support it
+            // We'll use manual polling with ? status requests
+            reportingSetupTime = millis();
+            break;        
 
-    case WStype_CONNECTED: {
-      Serial.println("[FluidNC] Connected");
-      fluidncConnected = true;
-      machineState = "IDLE";
-      // Note: Modern FluidNC doesn't use $Report/Interval - relies on status requests via "?"
-      // String cmd = "$Report/Interval=" + String(cfg.status_update_rate) + "\n";
-      // if (!webSocket.sendTXT(cmd)) {
-      //   Serial.println("[FluidNC] Warning: Failed to send report interval command");
-      // }
-      break;
+        case WStype_TEXT:
+            {
+                char* msg = (char*)payload;
+                if (debugWebSocket) {
+                    Serial.printf("[FluidNC] RX TEXT (%d bytes): ", length);
+                    for(size_t i = 0; i < length; i++) {
+                        Serial.print(msg[i]);
+                    }
+                    Serial.println();
+                }
+                
+                String msgStr = String(msg);
+                if (msgStr.startsWith("<")) {
+                    parseFluidNCStatus(msgStr);
+                } else if (msgStr.startsWith("ALARM:")) {
+                    machineState = "ALARM";
+                    parseFluidNCStatus(msgStr);
+                }
+            }
+            break;
+            
+        case WStype_BIN:
+            {
+                // FluidNC sends status as BINARY data
+                if (debugWebSocket) {
+                    Serial.printf("[FluidNC] RX BINARY (%d bytes): ", length);
+                }
+                
+                // Convert binary payload to null-terminated string
+                char* msg = (char*)malloc(length + 1);
+                if (msg != nullptr) {
+                    memcpy(msg, payload, length);
+                    msg[length] = '\0';
+                    
+                    if (debugWebSocket) {
+                        Serial.println(msg);
+                    }
+                    
+                    // Parse the status message
+                    String msgStr = String(msg);
+                    parseFluidNCStatus(msgStr);
+                    
+                    free(msg);
+                } else {
+                    Serial.println("[FluidNC] ERROR: Failed to allocate memory");
+                }
+            }
+            break;
+            
+        case WStype_ERROR:
+            Serial.println("[FluidNC] WebSocket Error!");
+            break;
+            
+        case WStype_PING:
+            // Ping/pong for keep-alive - normal, no logging needed
+            break;
+            
+        case WStype_PONG:
+            break;
+            
+        default:
+            if (debugWebSocket) {
+                Serial.printf("[FluidNC] Event type: %d\n", type);
+            }
+            break;
     }
-
-    case WStype_TEXT: {
-      String msg = String((char*)payload);
-      Serial.print("[FluidNC RX] ");
-      Serial.println(msg);
-      if (msg.startsWith("<")) {
-        parseFluidNCStatus(msg);
-      }
-      break;
-    }
-
-    case WStype_ERROR:
-      Serial.println("[FluidNC] WebSocket Error");
-      break;
-  }
 }
 
 void parseFluidNCStatus(String status) {
-  String oldState = machineState;
-  
-  // Parse state
-  if (status.indexOf("Idle") > 0) machineState = "IDLE";
-  else if (status.indexOf("Run") > 0) machineState = "RUN";
-  else if (status.indexOf("Hold") > 0) machineState = "HOLD";
-  else if (status.indexOf("Alarm") > 0) machineState = "ALARM";
-  else if (status.indexOf("Home") > 0) machineState = "HOME";
-  else if (status.indexOf("Jog") > 0) machineState = "JOG";
-  
-  // Job tracking
-  if (oldState != "RUN" && machineState == "RUN") {
-    jobStartTime = millis();
-    isJobRunning = true;
-  }
-  if (oldState == "RUN" && machineState != "RUN") {
-    isJobRunning = false;
-  }
-  
-  // Parse MPos
-  int mposIndex = status.indexOf("MPos:");
-  if (mposIndex > 0) {
-    int endIndex = status.indexOf("|", mposIndex);
-    String posStr = status.substring(mposIndex + 5, endIndex);
-    sscanf(posStr.c_str(), "%f,%f,%f,%f", &posX, &posY, &posZ, &posA);
-  }
-  
-  // Parse WPos
-  int wposIndex = status.indexOf("WPos:");
-  if (wposIndex > 0) {
-    int endIndex = status.indexOf("|", wposIndex);
-    String posStr = status.substring(wposIndex + 5, endIndex);
-    sscanf(posStr.c_str(), "%f,%f,%f,%f", &wposX, &wposY, &wposZ, &wposA);
-  } else {
-    wposX = posX;
-    wposY = posY;
-    wposZ = posZ;
-    wposA = posA;
-  }
-  
-  // Parse FS
-  int fsIndex = status.indexOf("FS:");
-  if (fsIndex > 0) {
-    int endIndex = status.indexOf("|", fsIndex);
-    String fsStr = status.substring(fsIndex + 3, endIndex);
-    sscanf(fsStr.c_str(), "%d,%d", &feedRate, &spindleRPM);
-  }
+    String oldState = machineState;
+    
+    // Parse state (between < and |)
+    int stateEnd = status.indexOf('|');
+    if (stateEnd > 0) {
+        String state = status.substring(1, stateEnd);
+        machineState = state;
+        machineState.toUpperCase();
+        
+        // Job tracking
+        if (oldState != "RUN" && machineState == "RUN") {
+            jobStartTime = millis();
+            isJobRunning = true;
+        }
+        if (oldState == "RUN" && machineState != "RUN") {
+            isJobRunning = false;
+        }
+    }
+    
+    // Parse MPos (Machine Position) - supports 3 or 4 axes
+    int mposIndex = status.indexOf("MPos:");
+    if (mposIndex >= 0) {
+        int endIndex = status.indexOf('|', mposIndex);
+        if (endIndex < 0) endIndex = status.indexOf('>', mposIndex);
+        String posStr = status.substring(mposIndex + 5, endIndex);
+        
+        // Count commas to determine axis count
+        int commaCount = 0;
+        for (int i = 0; i < posStr.length(); i++) {
+            if (posStr.charAt(i) == ',') commaCount++;
+        }
+        
+        if (commaCount >= 3) {
+            // 4-axis machine
+            sscanf(posStr.c_str(), "%f,%f,%f,%f", &posX, &posY, &posZ, &posA);
+        } else {
+            // 3-axis machine
+            sscanf(posStr.c_str(), "%f,%f,%f", &posX, &posY, &posZ);
+            posA = 0;
+        }
+    }
+    
+    // Parse WPos (Work Position) if present
+    int wposIndex = status.indexOf("WPos:");
+    if (wposIndex >= 0) {
+        int endIndex = status.indexOf('|', wposIndex);
+        if (endIndex < 0) endIndex = status.indexOf('>', wposIndex);
+        String posStr = status.substring(wposIndex + 5, endIndex);
+        
+        int commaCount = 0;
+        for (int i = 0; i < posStr.length(); i++) {
+            if (posStr.charAt(i) == ',') commaCount++;
+        }
+        
+        if (commaCount >= 3) {
+            sscanf(posStr.c_str(), "%f,%f,%f,%f", &wposX, &wposY, &wposZ, &wposA);
+        } else {
+            sscanf(posStr.c_str(), "%f,%f,%f", &wposX, &wposY, &wposZ);
+            wposA = 0;
+        }
+    } else {
+        // No WPos - use MPos
+        wposX = posX;
+        wposY = posY;
+        wposZ = posZ;
+        wposA = posA;
+    }
+    
+    // Parse WCO (Work Coordinate Offset) if present
+    int wcoIndex = status.indexOf("WCO:");
+    if (wcoIndex >= 0) {
+        int endIndex = status.indexOf('|', wcoIndex);
+        if (endIndex < 0) endIndex = status.indexOf('>', wcoIndex);
+        String wcoStr = status.substring(wcoIndex + 4, endIndex);
+        
+        int commaCount = 0;
+        for (int i = 0; i < wcoStr.length(); i++) {
+            if (wcoStr.charAt(i) == ',') commaCount++;
+        }
+        
+        if (commaCount >= 3) {
+            sscanf(wcoStr.c_str(), "%f,%f,%f,%f", &wcoX, &wcoY, &wcoZ, &wcoA);
+        } else {
+            sscanf(wcoStr.c_str(), "%f,%f,%f", &wcoX, &wcoY, &wcoZ);
+            wcoA = 0;
+        }
+        
+        // Calculate WPos from MPos - WCO
+        wposX = posX - wcoX;
+        wposY = posY - wcoY;
+        wposZ = posZ - wcoZ;
+        wposA = posA - wcoA;
+    }
+    
+    // Parse FS (Feed rate and Spindle speed)
+    int fsIndex = status.indexOf("FS:");
+    if (fsIndex >= 0) {
+        int endIndex = status.indexOf('|', fsIndex);
+        if (endIndex < 0) endIndex = status.indexOf('>', fsIndex);
+        String fsStr = status.substring(fsIndex + 3, endIndex);
+        sscanf(fsStr.c_str(), "%d,%d", &feedRate, &spindleRPM);
+    }
+    
+    // Parse Ov (Overrides) if present
+    int ovIndex = status.indexOf("Ov:");
+    if (ovIndex >= 0) {
+        int endIndex = status.indexOf('|', ovIndex);
+        if (endIndex < 0) endIndex = status.indexOf('>', ovIndex);
+        String ovStr = status.substring(ovIndex + 3, endIndex);
+        sscanf(ovStr.c_str(), "%d,%d,%d", &feedOverride, &rapidOverride, &spindleOverride);
+    }
 }
 
 // ========== Core Functions (Temperature, Fan, etc) ==========
@@ -1859,34 +2000,72 @@ void drawAlignmentMode() {
   gfx.setCursor(150, 40);
   gfx.print("WORK POSITION");
   
-  // Extra-large coordinates
-  gfx.setTextSize(5);
-  gfx.setTextColor(COLOR_VALUE);
+  // Detect if 4-axis machine (if A-axis is non-zero or moving)
+  bool has4Axes = (posA != 0 || wposA != 0);
   
-  char coordFormat[20];
-  if (cfg.coord_decimal_places == 3) {
-    strcpy(coordFormat, "X:%9.3f");
+  if (has4Axes) {
+    // 4-AXIS DISPLAY - Slightly smaller to fit all axes
+    gfx.setTextSize(4);
+    gfx.setTextColor(COLOR_VALUE);
+    
+    char coordFormat[20];
+    if (cfg.coord_decimal_places == 3) {
+      strcpy(coordFormat, "X:%9.3f");
+    } else {
+      strcpy(coordFormat, "X:%8.2f");
+    }
+    
+    gfx.setCursor(40, 75);
+    gfx.printf(coordFormat, wposX);
+    
+    coordFormat[0] = 'Y';
+    gfx.setCursor(40, 120);
+    gfx.printf(coordFormat, wposY);
+    
+    coordFormat[0] = 'Z';
+    gfx.setCursor(40, 165);
+    gfx.printf(coordFormat, wposZ);
+    
+    coordFormat[0] = 'A';
+    gfx.setCursor(40, 210);
+    gfx.printf(coordFormat, wposA);
+    
+    // Small info footer for 4-axis
+    gfx.setTextSize(1);
+    gfx.setTextColor(COLOR_LINE);
+    gfx.setCursor(10, 265);
+    gfx.printf("Machine: X:%.1f Y:%.1f Z:%.1f A:%.1f", posX, posY, posZ, posA);
   } else {
-    strcpy(coordFormat, "X:%8.2f");
+    // 3-AXIS DISPLAY - Original large size
+    gfx.setTextSize(5);
+    gfx.setTextColor(COLOR_VALUE);
+    
+    char coordFormat[20];
+    if (cfg.coord_decimal_places == 3) {
+      strcpy(coordFormat, "X:%9.3f");
+    } else {
+      strcpy(coordFormat, "X:%8.2f");
+    }
+    
+    gfx.setCursor(40, 90);
+    gfx.printf(coordFormat, wposX);
+    
+    coordFormat[0] = 'Y';
+    gfx.setCursor(40, 145);
+    gfx.printf(coordFormat, wposY);
+    
+    coordFormat[0] = 'Z';
+    gfx.setCursor(40, 200);
+    gfx.printf(coordFormat, wposZ);
+    
+    // Small info footer for 3-axis
+    gfx.setTextSize(1);
+    gfx.setTextColor(COLOR_LINE);
+    gfx.setCursor(10, 270);
+    gfx.printf("Machine: X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
   }
   
-  gfx.setCursor(40, 90);
-  gfx.printf(coordFormat, wposX);
-  
-  coordFormat[0] = 'Y';
-  gfx.setCursor(40, 145);
-  gfx.printf(coordFormat, wposY);
-  
-  coordFormat[0] = 'Z';
-  gfx.setCursor(40, 200);
-  gfx.printf(coordFormat, wposZ);
-  
-  // Small info footer
-  gfx.setTextSize(1);
-  gfx.setTextColor(COLOR_LINE);
-  gfx.setCursor(10, 270);
-  gfx.printf("Machine: X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
-  
+  // Status line (same for both)
   gfx.setCursor(10, 285);
   if (machineState == "RUN") gfx.setTextColor(COLOR_GOOD);
   else if (machineState == "ALARM") gfx.setTextColor(COLOR_WARN);
@@ -1903,38 +2082,84 @@ void drawAlignmentMode() {
   gfx.printf("Temps:%.0fC  Fan:%d%%  PSU:%.1fV", maxTemp, fanSpeed, psuVoltage);
 }
 
+
 void updateAlignmentMode() {
-  // Update large coordinates
-  gfx.setTextSize(5);
-  gfx.setTextColor(COLOR_VALUE);
+  // Detect if 4-axis machine
+  bool has4Axes = (posA != 0 || wposA != 0);
   
-  char coordFormat[20];
-  if (cfg.coord_decimal_places == 3) {
-    strcpy(coordFormat, "%9.3f");
+  if (has4Axes) {
+    // 4-AXIS UPDATE
+    gfx.setTextSize(4);
+    gfx.setTextColor(COLOR_VALUE);
+    
+    char coordFormat[20];
+    if (cfg.coord_decimal_places == 3) {
+      strcpy(coordFormat, "%9.3f");
+    } else {
+      strcpy(coordFormat, "%8.2f");
+    }
+    
+    // Update X
+    gfx.fillRect(140, 75, 330, 32, COLOR_BG);
+    gfx.setCursor(140, 75);
+    gfx.printf(coordFormat, wposX);
+    
+    // Update Y
+    gfx.fillRect(140, 120, 330, 32, COLOR_BG);
+    gfx.setCursor(140, 120);
+    gfx.printf(coordFormat, wposY);
+    
+    // Update Z
+    gfx.fillRect(140, 165, 330, 32, COLOR_BG);
+    gfx.setCursor(140, 165);
+    gfx.printf(coordFormat, wposZ);
+    
+    // Update A
+    gfx.fillRect(140, 210, 330, 32, COLOR_BG);
+    gfx.setCursor(140, 210);
+    gfx.printf(coordFormat, wposA);
+    
+    // Update footer
+    gfx.setTextSize(1);
+    gfx.fillRect(90, 265, 390, 40, COLOR_BG);
+    
+    gfx.setTextColor(COLOR_LINE);
+    gfx.setCursor(90, 265);
+    gfx.printf("X:%.1f Y:%.1f Z:%.1f A:%.1f", posX, posY, posZ, posA);
   } else {
-    strcpy(coordFormat, "%8.2f");
+    // 3-AXIS UPDATE - Original code
+    gfx.setTextSize(5);
+    gfx.setTextColor(COLOR_VALUE);
+    
+    char coordFormat[20];
+    if (cfg.coord_decimal_places == 3) {
+      strcpy(coordFormat, "%9.3f");
+    } else {
+      strcpy(coordFormat, "%8.2f");
+    }
+    
+    gfx.fillRect(150, 90, 320, 38, COLOR_BG);
+    gfx.setCursor(150, 90);
+    gfx.printf(coordFormat, wposX);
+    
+    gfx.fillRect(150, 145, 320, 38, COLOR_BG);
+    gfx.setCursor(150, 145);
+    gfx.printf(coordFormat, wposY);
+    
+    gfx.fillRect(150, 200, 320, 38, COLOR_BG);
+    gfx.setCursor(150, 200);
+    gfx.printf(coordFormat, wposZ);
+    
+    // Update footer
+    gfx.setTextSize(1);
+    gfx.fillRect(90, 270, 390, 35, COLOR_BG);
+    
+    gfx.setTextColor(COLOR_LINE);
+    gfx.setCursor(90, 270);
+    gfx.printf("X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
   }
   
-  gfx.fillRect(150, 90, 320, 38, COLOR_BG);
-  gfx.setCursor(150, 90);
-  gfx.printf(coordFormat, wposX);
-  
-  gfx.fillRect(150, 145, 320, 38, COLOR_BG);
-  gfx.setCursor(150, 145);
-  gfx.printf(coordFormat, wposY);
-  
-  gfx.fillRect(150, 200, 320, 38, COLOR_BG);
-  gfx.setCursor(150, 200);
-  gfx.printf(coordFormat, wposZ);
-  
-  // Update footer
-  gfx.setTextSize(1);
-  gfx.fillRect(90, 270, 390, 45, COLOR_BG);
-  
-  gfx.setTextColor(COLOR_LINE);
-  gfx.setCursor(90, 270);
-  gfx.printf("X:%.1f Y:%.1f Z:%.1f", posX, posY, posZ);
-  
+  // Update status (same for both)
   gfx.setCursor(80, 285);
   if (machineState == "RUN") gfx.setTextColor(COLOR_GOOD);
   else if (machineState == "ALARM") gfx.setTextColor(COLOR_WARN);
