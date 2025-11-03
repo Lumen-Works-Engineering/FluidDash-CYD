@@ -1,5 +1,5 @@
 /*
- * FluidDash v0.09 - CYD Edition
+ * FluidDash v0.1 - CYD Edition with JSON Screen Layouts
  * Configured for ESP32-2432S028 (CYD 3.5" or 4.0" modules)
  * - WiFiManager for initial setup
  * - Preferences for persistent storage
