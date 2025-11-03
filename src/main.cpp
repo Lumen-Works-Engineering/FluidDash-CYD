@@ -631,8 +631,205 @@ String getDataString(const char* dataSource) {
     float value = getDataValue(dataSource);
     return String(value, 2);
 }
-
 // ========== END PHASE 2 PARSING FUNCTIONS ==========
+
+// ========== PHASE 2: DRAWING FUNCTIONS ==========
+
+// Draw a single screen element
+void drawElement(const ScreenElement& elem) {
+    switch(elem.type) {
+        case ELEM_RECT:
+            if (elem.filled) {
+                gfx.fillRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+            } else {
+                gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+            }
+            break;
+            
+        case ELEM_LINE:
+            if (elem.w > elem.h) {
+                // Horizontal line
+                gfx.drawFastHLine(elem.x, elem.y, elem.w, elem.color);
+            } else {
+                // Vertical line
+                gfx.drawFastVLine(elem.x, elem.y, elem.h, elem.color);
+            }
+            break;
+            
+        case ELEM_TEXT_STATIC:
+            gfx.setTextSize(elem.textSize);
+            gfx.setTextColor(elem.color);
+            gfx.setCursor(elem.x, elem.y);
+            gfx.print(elem.label);
+            break;
+            
+        case ELEM_TEXT_DYNAMIC:
+            {
+                gfx.setTextSize(elem.textSize);
+                gfx.setTextColor(elem.color);
+                gfx.setCursor(elem.x, elem.y);
+                
+                String value = getDataString(elem.dataSource);
+                if (elem.showLabel && strlen(elem.label) > 0) {
+                    gfx.print(elem.label);
+                }
+                gfx.print(value);
+            }
+            break;
+            
+        case ELEM_TEMP_VALUE:
+            {
+                gfx.setTextSize(elem.textSize);
+                gfx.setTextColor(elem.color);
+                gfx.setCursor(elem.x, elem.y);
+                
+                float temp = getDataValue(elem.dataSource);
+                if (cfg.use_fahrenheit) {
+                    temp = temp * 9.0 / 5.0 + 32.0;
+                }
+                
+                if (elem.showLabel && strlen(elem.label) > 0) {
+                    gfx.print(elem.label);
+                }
+                gfx.printf("%.*f%c", elem.decimals, temp, 
+                          cfg.use_fahrenheit ? 'F' : 'C');
+            }
+            break;
+            
+        case ELEM_COORD_VALUE:
+            {
+                gfx.setTextSize(elem.textSize);
+                gfx.setTextColor(elem.color);
+                gfx.setCursor(elem.x, elem.y);
+                
+                float value = getDataValue(elem.dataSource);
+                if (cfg.use_inches) {
+                    value = value / 25.4;
+                }
+                
+                if (elem.showLabel && strlen(elem.label) > 0) {
+                    gfx.print(elem.label);
+                }
+                gfx.printf("%.*f", elem.decimals, value);
+            }
+            break;
+            
+        case ELEM_STATUS_VALUE:
+            {
+                gfx.setTextSize(elem.textSize);
+                
+                // Color-code machine state
+                if (strcmp(elem.dataSource, "machineState") == 0) {
+                    if (machineState == "RUN") {
+                        gfx.setTextColor(COLOR_GOOD);
+                    } else if (machineState == "ALARM") {
+                        gfx.setTextColor(COLOR_WARN);
+                    } else {
+                        gfx.setTextColor(elem.color);
+                    }
+                } else {
+                    gfx.setTextColor(elem.color);
+                }
+                
+                gfx.setCursor(elem.x, elem.y);
+                
+                if (elem.showLabel && strlen(elem.label) > 0) {
+                    gfx.print(elem.label);
+                }
+                
+                String value = getDataString(elem.dataSource);
+                gfx.print(value);
+            }
+            break;
+            
+        case ELEM_PROGRESS_BAR:
+            {
+                // Draw outline
+                gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+                
+                // Calculate progress (placeholder - would need job tracking)
+                int progress = 0;  // 0-100%
+                int fillWidth = (elem.w - 2) * progress / 100;
+                
+                // Draw filled portion
+                if (fillWidth > 0) {
+                    gfx.fillRect(elem.x + 1, elem.y + 1, 
+                               fillWidth, elem.h - 2, elem.color);
+                }
+            }
+            break;
+            
+        case ELEM_GRAPH:
+            // Placeholder for mini-graph rendering
+            gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+            gfx.setTextSize(1);
+            gfx.setTextColor(elem.color);
+            gfx.setCursor(elem.x + 5, elem.y + 5);
+            gfx.print("GRAPH");
+            break;
+            
+        default:
+            break;
+    }
+}
+
+// Draw entire screen from layout definition
+void drawScreenFromLayout(const ScreenLayout& layout) {
+    if (!layout.isValid) {
+        Serial.println("[JSON] Invalid layout, cannot draw");
+        return;
+    }
+    
+    // Clear screen with background color
+    gfx.fillScreen(layout.backgroundColor);
+    
+    // Draw all elements
+    for (uint8_t i = 0; i < layout.elementCount; i++) {
+        drawElement(layout.elements[i]);
+    }
+}
+
+// Update only dynamic elements (for efficient screen updates)
+void updateDynamicElements(const ScreenLayout& layout) {
+    if (!layout.isValid) return;
+    
+    for (uint8_t i = 0; i < layout.elementCount; i++) {
+        const ScreenElement& elem = layout.elements[i];
+        
+        // Only update elements that display dynamic data
+        if (elem.type == ELEM_TEXT_DYNAMIC || 
+            elem.type == ELEM_TEMP_VALUE || 
+            elem.type == ELEM_COORD_VALUE || 
+            elem.type == ELEM_STATUS_VALUE ||
+            elem.type == ELEM_PROGRESS_BAR) {
+            
+            // Clear the element area
+            if (elem.w > 0 && elem.h > 0) {
+                gfx.fillRect(elem.x, elem.y, elem.w, elem.h, elem.bgColor);
+            }
+            
+            // Redraw the element
+            drawElement(elem);
+        }
+    }
+}
+
+// Initialize default/fallback layouts in case JSON files are missing
+void initDefaultLayouts() {
+    // Mark all layouts as invalid initially
+    monitorLayout.isValid = false;
+    alignmentLayout.isValid = false;
+    graphLayout.isValid = false;
+    networkLayout.isValid = false;
+    
+    strcpy(monitorLayout.name, "Monitor (Fallback)");
+    strcpy(alignmentLayout.name, "Alignment (Fallback)");
+    strcpy(graphLayout.name, "Graph (Fallback)");
+    strcpy(networkLayout.name, "Network (Fallback)");
+    
+    Serial.println("[JSON] Default layouts initialized (fallback mode)");
+}
+// ========== END PHASE 2 DRAWING FUNCTIONS ==========
 
 void setup() {
   Serial.begin(115200);
@@ -768,14 +965,47 @@ void setup() {
             Serial.println("Directory exists: /screens");
         }
         
-        Serial.println("SD card ready for Phase 2!\n");
     } else {
         sdCardAvailable = false;
         Serial.println("WARNING: SD card not detected");
         Serial.println("Insert SD card and restart for Phase 2 features\n");
     }
     // ========== END SD CARD TEST ==========
+    // ========== PHASE 2: LOAD JSON SCREEN LAYOUTS ==========
+    feedLoopWDT();
+    initDefaultLayouts();  // Initialize fallback state
 
+    if (sdCardAvailable) {
+        Serial.println("\n=== Loading JSON Screen Layouts ===");
+        
+        // Try to load monitor layout
+        if (loadScreenConfig("/screens/monitor.json", monitorLayout)) {
+            Serial.println("[JSON] Monitor layout loaded successfully");
+        } else {
+            Serial.println("[JSON] Monitor layout not found or invalid, using fallback");
+        }
+        
+        // Try to load alignment layout (optional for now)
+        if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) {
+            Serial.println("[JSON] Alignment layout loaded successfully");
+        }
+        
+        // Try to load graph layout (optional for now)
+        if (loadScreenConfig("/screens/graph.json", graphLayout)) {
+            Serial.println("[JSON] Graph layout loaded successfully");
+        }
+        
+        // Try to load network layout (optional for now)
+        if (loadScreenConfig("/screens/network.json", networkLayout)) {
+            Serial.println("[JSON] Network layout loaded successfully");
+        }
+        
+        layoutsLoaded = true;
+        Serial.println("=== JSON Layout Loading Complete ===\n");
+    } else {
+        Serial.println("[JSON] SD card not available, using legacy drawing\n");
+    }
+    // ========== END PHASE 2 LAYOUT LOADING ==========
     feedLoopWDT();
 
     // Set up mDNS
@@ -1166,6 +1396,31 @@ void setupWebServer() {
     Serial.println("WiFi credentials saved. Restarting...");
     delay(2000);
     ESP.restart();
+  });
+
+  // API: Reload screen layouts from SD card
+  server.on("/api/reload-screens", HTTP_POST, [](AsyncWebServerRequest *request){
+      if (!sdCardAvailable) {
+          request->send(200, "application/json", "{\"success\":false,\"message\":\"SD card not available\"}");
+          return;
+      }
+      
+      Serial.println("[JSON] Reloading screen layouts...");
+      
+      int loaded = 0;
+      if (loadScreenConfig("/screens/monitor.json", monitorLayout)) loaded++;
+      if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) loaded++;
+      if (loadScreenConfig("/screens/graph.json", graphLayout)) loaded++;
+      if (loadScreenConfig("/screens/network.json", networkLayout)) loaded++;
+      
+      // Redraw current screen
+      drawScreen();
+      
+      char response[128];
+      sprintf(response, "{\"success\":true,\"message\":\"Reloaded %d layouts\"}", loaded);
+      request->send(200, "application/json", response);
+      
+      Serial.printf("[JSON] Reloaded %d layouts\n", loaded);
   });
 
   server.begin();
@@ -2044,21 +2299,42 @@ void updateTempHistory() {
 // ========== Improved Display Functions ==========
 
 void drawScreen() {
-  // LovyanGFX version - draw each mode's initial screen
-  switch(currentMode) {
-    case MODE_MONITOR:
-      drawMonitorMode();
-      break;
-    case MODE_ALIGNMENT:
-      drawAlignmentMode();
-      break;
-    case MODE_GRAPH:
-      drawGraphMode();
-      break;
-    case MODE_NETWORK:
-      drawNetworkMode();
-      break;
-  }
+    switch(currentMode) {
+        case MODE_MONITOR:
+            // Try JSON layout first, fallback to legacy if not available
+            if (monitorLayout.isValid) {
+                Serial.println("[JSON] Drawing monitor from JSON layout");
+                drawScreenFromLayout(monitorLayout);
+            } else {
+                Serial.println("[Legacy] Drawing monitor with legacy code");
+                drawMonitorMode();
+            }
+            break;
+            
+        case MODE_ALIGNMENT:
+            if (alignmentLayout.isValid) {
+                drawScreenFromLayout(alignmentLayout);
+            } else {
+                drawAlignmentMode();
+            }
+            break;
+            
+        case MODE_GRAPH:
+            if (graphLayout.isValid) {
+                drawScreenFromLayout(graphLayout);
+            } else {
+                drawGraphMode();
+            }
+            break;
+            
+        case MODE_NETWORK:
+            if (networkLayout.isValid) {
+                drawScreenFromLayout(networkLayout);
+            } else {
+                drawNetworkMode();
+            }
+            break;
+    }
 }
 
 void drawMonitorMode() {
@@ -2183,16 +2459,32 @@ void drawMonitorMode() {
 }
 
 void updateDisplay() {
-  // LovyanGFX version - update dynamic parts of each display mode
-  if (currentMode == MODE_MONITOR) {
-    updateMonitorMode();
-  } else if (currentMode == MODE_ALIGNMENT) {
-    updateAlignmentMode();
-  } else if (currentMode == MODE_GRAPH) {
-    updateGraphMode();
-  } else if (currentMode == MODE_NETWORK) {
-    updateNetworkMode();
-  }
+    if (currentMode == MODE_MONITOR) {
+        // Use JSON dynamic update if available, otherwise legacy
+        if (monitorLayout.isValid) {
+            updateDynamicElements(monitorLayout);
+        } else {
+            updateMonitorMode();
+        }
+    } else if (currentMode == MODE_ALIGNMENT) {
+        if (alignmentLayout.isValid) {
+            updateDynamicElements(alignmentLayout);
+        } else {
+            updateAlignmentMode();
+        }
+    } else if (currentMode == MODE_GRAPH) {
+        if (graphLayout.isValid) {
+            updateDynamicElements(graphLayout);
+        } else {
+            updateGraphMode();
+        }
+    } else if (currentMode == MODE_NETWORK) {
+        if (networkLayout.isValid) {
+            updateDynamicElements(networkLayout);
+        } else {
+            updateNetworkMode();
+        }
+    }
 }
 
 void updateMonitorMode() {
