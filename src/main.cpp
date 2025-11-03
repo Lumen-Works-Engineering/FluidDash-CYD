@@ -46,6 +46,7 @@ public:
 #include <ESPmDNS.h>
 #include <SD.h>
 #include <SPI.h>
+#include <ArduinoJson.h>
 
 // ========== CYD HARDWARE PIN CONFIGURATION ==========
 // Compatible with E32R35T (3.5") and E32R40T (4.0")
@@ -333,6 +334,62 @@ bool buttonPressed = false;
 #define COLOR_LINE     0x4208
 #define COLOR_ORANGE   0xFD20
 
+// ========== PHASE 2: JSON SCREEN LAYOUT SYSTEM ==========
+
+// Element types for JSON-defined screens
+enum ElementType {
+    ELEM_NONE = 0,
+    ELEM_RECT,              // Filled or outline rectangle
+    ELEM_LINE,              // Horizontal or vertical line
+    ELEM_TEXT_STATIC,       // Fixed label text
+    ELEM_TEXT_DYNAMIC,      // Text from data source
+    ELEM_TEMP_VALUE,        // Temperature display (temp0-3)
+    ELEM_COORD_VALUE,       // Coordinate display (posX, wposX, etc)
+    ELEM_STATUS_VALUE,      // Status text (machineState, feedRate, etc)
+    ELEM_PROGRESS_BAR,      // Progress bar (for job completion)
+    ELEM_GRAPH              // Mini graph placeholder
+};
+
+// Alignment options
+enum TextAlign {
+    ALIGN_LEFT = 0,
+    ALIGN_CENTER,
+    ALIGN_RIGHT
+};
+
+// Screen element definition
+struct ScreenElement {
+    ElementType type;
+    int16_t x, y, w, h;
+    uint16_t color;
+    uint16_t bgColor;
+    uint8_t textSize;
+    char label[32];          // For static text or prefix (e.g., "X:")
+    char dataSource[32];     // Data source identifier (e.g., "wposX", "temp0")
+    uint8_t decimals;        // Decimal places for numeric values
+    bool filled;             // For rectangles - filled or outline
+    TextAlign align;         // Text alignment
+    bool showLabel;          // Show label prefix
+};
+
+// Screen layout definition
+struct ScreenLayout {
+    char name[32];
+    uint16_t backgroundColor;
+    ScreenElement elements[60];  // Max 60 elements per screen
+    uint8_t elementCount;
+    bool isValid;
+};
+
+// ========== END PHASE 2 STRUCTURES ==========
+// ========== PHASE 2: JSON LAYOUT STORAGE ==========
+ScreenLayout monitorLayout;
+ScreenLayout alignmentLayout;
+ScreenLayout graphLayout;
+ScreenLayout networkLayout;
+bool layoutsLoaded = false;
+// ========== END PHASE 2 GLOBALS ==========
+
 // ========== Function Prototypes ==========
 void loadConfig();
 void saveConfig();
@@ -375,10 +432,207 @@ void showSplashScreen();
 const char* getMonthName(int month);
 void enableLoopWDT();
 void feedLoopWDT();
+// ========== PHASE 2: JSON FUNCTION PROTOTYPES ==========
+bool loadScreenConfig(const char* filename, ScreenLayout& layout);
+void drawScreenFromLayout(const ScreenLayout& layout);
+void drawElement(const ScreenElement& elem);
+float getDataValue(const char* dataSource);
+String getDataString(const char* dataSource);
+uint16_t parseColor(const char* hexColor);
+void initDefaultLayouts();
+// ========== END PHASE 2 PROTOTYPES ==========
 
 void IRAM_ATTR tachISR() {
   tachCounter++;
 }
+
+// ========== PHASE 2: JSON PARSING & DRAWING FUNCTIONS ==========
+
+// Convert hex color string to uint16_t RGB565
+uint16_t parseColor(const char* hexColor) {
+    if (hexColor == nullptr || strlen(hexColor) < 4) {
+        return 0x0000; // Default to black
+    }
+    
+    // Skip '#' if present
+    const char* hex = (hexColor[0] == '#') ? hexColor + 1 : hexColor;
+    
+    // Parse hex string
+    uint32_t color = strtoul(hex, nullptr, 16);
+    
+    // Convert to RGB565
+    if (strlen(hex) == 4) {
+        // Short form: RGB -> RRGGBB
+        uint8_t r = ((color >> 8) & 0xF) * 17;
+        uint8_t g = ((color >> 4) & 0xF) * 17;
+        uint8_t b = (color & 0xF) * 17;
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    } else {
+        // Full form: RRGGBB
+        uint8_t r = (color >> 16) & 0xFF;
+        uint8_t g = (color >> 8) & 0xFF;
+        uint8_t b = color & 0xFF;
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    }
+}
+
+// Parse element type from string
+ElementType parseElementType(const char* typeStr) {
+    if (strcmp(typeStr, "rect") == 0) return ELEM_RECT;
+    if (strcmp(typeStr, "line") == 0) return ELEM_LINE;
+    if (strcmp(typeStr, "text") == 0) return ELEM_TEXT_STATIC;
+    if (strcmp(typeStr, "dynamic") == 0) return ELEM_TEXT_DYNAMIC;
+    if (strcmp(typeStr, "temp") == 0) return ELEM_TEMP_VALUE;
+    if (strcmp(typeStr, "coord") == 0) return ELEM_COORD_VALUE;
+    if (strcmp(typeStr, "status") == 0) return ELEM_STATUS_VALUE;
+    if (strcmp(typeStr, "progress") == 0) return ELEM_PROGRESS_BAR;
+    if (strcmp(typeStr, "graph") == 0) return ELEM_GRAPH;
+    return ELEM_NONE;
+}
+
+// Parse text alignment from string
+TextAlign parseAlignment(const char* alignStr) {
+    if (strcmp(alignStr, "center") == 0) return ALIGN_CENTER;
+    if (strcmp(alignStr, "right") == 0) return ALIGN_RIGHT;
+    return ALIGN_LEFT;
+}
+
+// Load screen configuration from JSON file
+bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
+    if (!sdCardAvailable) {
+        Serial.printf("[JSON] SD card not available, cannot load %s\n", filename);
+        return false;
+    }
+    
+    Serial.printf("[JSON] Loading screen config: %s\n", filename);
+    
+    // Open file
+    File file = SD.open(filename, FILE_READ);
+    if (!file) {
+        Serial.printf("[JSON] Failed to open %s\n", filename);
+        return false;
+    }
+    
+    // Read file content
+    size_t fileSize = file.size();
+    if (fileSize > 8192) {
+        Serial.printf("[JSON] File too large: %d bytes (max 8192)\n", fileSize);
+        file.close();
+        return false;
+    }
+    
+    // Allocate buffer
+    char* jsonBuffer = (char*)malloc(fileSize + 1);
+    if (!jsonBuffer) {
+        Serial.println("[JSON] Failed to allocate memory");
+        file.close();
+        return false;
+    }
+    
+    // Read file
+    size_t bytesRead = file.readBytes(jsonBuffer, fileSize);
+    jsonBuffer[bytesRead] = '\0';
+    file.close();
+    
+    // Parse JSON
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, jsonBuffer);
+    free(jsonBuffer);
+    
+    if (error) {
+        Serial.printf("[JSON] Parse error: %s\n", error.c_str());
+        return false;
+    }
+    
+    // Extract layout info
+    strncpy(layout.name, doc["name"] | "Unnamed", sizeof(layout.name) - 1);
+    layout.backgroundColor = parseColor(doc["background"] | "0000");
+    layout.elementCount = 0;
+    layout.isValid = false;
+    
+    // Parse elements array
+    JsonArray elements = doc["elements"].as<JsonArray>();
+    if (!elements) {
+        Serial.println("[JSON] No elements array found");
+        return false;
+    }
+    
+    int elementIndex = 0;
+    for (JsonObject elem : elements) {
+        if (elementIndex >= 60) {
+            Serial.println("[JSON] Warning: Max 60 elements, ignoring rest");
+            break;
+        }
+        
+        ScreenElement& se = layout.elements[elementIndex];
+        
+        // Parse element properties
+        se.type = parseElementType(elem["type"] | "none");
+        se.x = elem["x"] | 0;
+        se.y = elem["y"] | 0;
+        se.w = elem["w"] | 0;
+        se.h = elem["h"] | 0;
+        se.color = parseColor(elem["color"] | "FFFF");
+        se.bgColor = parseColor(elem["bgColor"] | "0000");
+        se.textSize = elem["size"] | 2;
+        se.decimals = elem["decimals"] | 2;
+        se.filled = elem["filled"] | true;
+        se.showLabel = elem["showLabel"] | true;
+        se.align = parseAlignment(elem["align"] | "left");
+        
+        // Copy strings
+        strncpy(se.label, elem["label"] | "", sizeof(se.label) - 1);
+        strncpy(se.dataSource, elem["data"] | "", sizeof(se.dataSource) - 1);
+        
+        elementIndex++;
+    }
+    
+    layout.elementCount = elementIndex;
+    layout.isValid = true;
+    
+    Serial.printf("[JSON] Loaded %d elements from %s\n", elementIndex, layout.name);
+    return true;
+}
+
+// Get numeric data value from data source identifier
+float getDataValue(const char* dataSource) {
+    if (strcmp(dataSource, "posX") == 0) return posX;
+    if (strcmp(dataSource, "posY") == 0) return posY;
+    if (strcmp(dataSource, "posZ") == 0) return posZ;
+    if (strcmp(dataSource, "posA") == 0) return posA;
+    
+    if (strcmp(dataSource, "wposX") == 0) return wposX;
+    if (strcmp(dataSource, "wposY") == 0) return wposY;
+    if (strcmp(dataSource, "wposZ") == 0) return wposZ;
+    if (strcmp(dataSource, "wposA") == 0) return wposA;
+    
+    if (strcmp(dataSource, "feedRate") == 0) return feedRate;
+    if (strcmp(dataSource, "spindleRPM") == 0) return spindleRPM;
+    if (strcmp(dataSource, "psuVoltage") == 0) return psuVoltage;
+    if (strcmp(dataSource, "fanSpeed") == 0) return fanSpeed;
+    
+    if (strcmp(dataSource, "temp0") == 0) return temperatures[0];
+    if (strcmp(dataSource, "temp1") == 0) return temperatures[1];
+    if (strcmp(dataSource, "temp2") == 0) return temperatures[2];
+    if (strcmp(dataSource, "temp3") == 0) return temperatures[3];
+    
+    return 0.0f;
+}
+
+// Get string data value from data source identifier
+String getDataString(const char* dataSource) {
+    if (strcmp(dataSource, "machineState") == 0) return machineState;
+    if (strcmp(dataSource, "ipAddress") == 0) return WiFi.localIP().toString();
+    if (strcmp(dataSource, "ssid") == 0) return WiFi.SSID();
+    if (strcmp(dataSource, "deviceName") == 0) return String(cfg.device_name);
+    if (strcmp(dataSource, "fluidncIP") == 0) return String(cfg.fluidnc_ip);
+    
+    // Numeric values as strings
+    float value = getDataValue(dataSource);
+    return String(value, 2);
+}
+
+// ========== END PHASE 2 PARSING FUNCTIONS ==========
 
 void setup() {
   Serial.begin(115200);
@@ -521,7 +775,7 @@ void setup() {
         Serial.println("Insert SD card and restart for Phase 2 features\n");
     }
     // ========== END SD CARD TEST ==========
-    
+
     feedLoopWDT();
 
     // Set up mDNS
@@ -2545,6 +2799,3 @@ const char* getMonthName(int month) {
                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
   return months[month];
 }
-
-// ========== Watchdog Timer Functions ==========
-// Note: enableLoopWDT() and feedLoopWDT() are provided by the ESP32 Arduino framework
