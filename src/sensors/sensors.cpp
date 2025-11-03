@@ -2,6 +2,15 @@
 #include "config/pins.h"
 #include "config/config.h"
 #include <Arduino.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+// ========== DS18B20 OneWire Setup ==========
+OneWire oneWire(ONE_WIRE_BUS_1);
+DallasTemperature ds18b20Sensors(&oneWire);
+
+// Sensor mappings vector (stores UID to friendly name mappings)
+std::vector<SensorMapping> sensorMappings;
 
 // ========== Temperature Monitoring ==========
 
@@ -104,14 +113,43 @@ void sampleSensorsNonBlocking() {
 }
 
 // Process averaged ADC readings (called when adcReady is true)
-// Calculates PSU voltage from averaged ADC samples
+// Calculates PSU voltage from averaged ADC samples and reads DS18B20 sensors
 void processAdcReadings() {
-  // CYD NOTE: Thermistor processing disabled - CYD uses DS18B20 OneWire sensors
-  // TODO: Implement DS18B20 OneWire temperature reading for CYD
-  // For now, set dummy temperature values to prevent display errors
-  for (int sensor = 0; sensor < 4; sensor++) {
-    temperatures[sensor] = 25.0;  // Placeholder: 25C room temperature
-    peakTemps[sensor] = 25.0;
+  // Read DS18B20 temperature sensors
+  ds18b20Sensors.requestTemperatures();  // Request readings from all sensors
+
+  // Update temperatures array with readings from mapped sensors
+  int deviceCount = ds18b20Sensors.getDeviceCount();
+
+  // Clear temperatures array first
+  for (int i = 0; i < 4; i++) {
+    temperatures[i] = 0.0;
+  }
+
+  // Read temperatures based on sensor mappings
+  for (size_t i = 0; i < sensorMappings.size() && i < 4; i++) {
+    if (sensorMappings[i].enabled) {
+      float temp = ds18b20Sensors.getTempC(sensorMappings[i].uid);
+      if (temp != DEVICE_DISCONNECTED_C && temp > -55.0 && temp < 125.0) {
+        temperatures[i] = temp;
+        if (temp > peakTemps[i]) {
+          peakTemps[i] = temp;
+        }
+      }
+    }
+  }
+
+  // If no mappings exist yet, read first 4 discovered sensors directly
+  if (sensorMappings.empty() && deviceCount > 0) {
+    for (int i = 0; i < min(deviceCount, 4); i++) {
+      float temp = ds18b20Sensors.getTempCByIndex(i);
+      if (temp != DEVICE_DISCONNECTED_C && temp > -55.0 && temp < 125.0) {
+        temperatures[i] = temp;
+        if (temp > peakTemps[i]) {
+          peakTemps[i] = temp;
+        }
+      }
+    }
   }
 
   // Process PSU voltage
@@ -125,4 +163,64 @@ void processAdcReadings() {
 
   if (psuVoltage < psuMin && psuVoltage > 10.0) psuMin = psuVoltage;
   if (psuVoltage > psuMax) psuMax = psuVoltage;
+}
+
+// ========== Sensor Management Functions ==========
+
+// Initialize DS18B20 sensors on OneWire bus
+void initDS18B20Sensors() {
+  Serial.println("[SENSORS] Initializing DS18B20 sensors...");
+
+  ds18b20Sensors.begin();
+  int deviceCount = ds18b20Sensors.getDeviceCount();
+
+  Serial.printf("[SENSORS] Found %d DS18B20 sensor(s) on bus\n", deviceCount);
+
+  // Set resolution to 12-bit for all sensors (0.0625°C precision)
+  ds18b20Sensors.setResolution(12);
+
+  // Set wait for conversion to false for non-blocking operation
+  ds18b20Sensors.setWaitForConversion(false);
+
+  // Print discovered sensor UIDs
+  for (int i = 0; i < deviceCount; i++) {
+    uint8_t addr[8];
+    if (ds18b20Sensors.getAddress(addr, i)) {
+      Serial.printf("[SENSORS] Sensor %d UID: ", i);
+      for (int j = 0; j < 8; j++) {
+        Serial.printf("%02X", addr[j]);
+        if (j < 7) Serial.print(":");
+      }
+      Serial.println();
+    }
+  }
+
+  Serial.println("[SENSORS] DS18B20 initialization complete");
+}
+
+// Get sensor count from mappings
+int getSensorCount() {
+  return sensorMappings.size();
+}
+
+// Get temperature by alias (e.g., "temp0")
+float getTempByAlias(const char* alias) {
+  for (const auto& mapping : sensorMappings) {
+    if (strcmp(mapping.alias, alias) == 0 && mapping.enabled) {
+      float temp = ds18b20Sensors.getTempC(mapping.uid);
+      if (temp != DEVICE_DISCONNECTED_C && temp > -55.0 && temp < 125.0) {
+        return temp;
+      }
+    }
+  }
+  return NAN;  // Return NaN if sensor not found or invalid reading
+}
+
+// Get temperature by UID
+float getTempByUID(const uint8_t uid[8]) {
+  float temp = ds18b20Sensors.getTempC(uid);
+  if (temp != DEVICE_DISCONNECTED_C && temp > -55.0 && temp < 125.0) {
+    return temp;
+  }
+  return NAN;
 }

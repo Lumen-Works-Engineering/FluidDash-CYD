@@ -651,6 +651,10 @@ void setup() {
   // Allocate history buffer based on config
   allocateHistoryBuffer();
 
+  // Initialize DS18B20 temperature sensors
+  feedLoopWDT();
+  initDS18B20Sensors();
+
   // Try to connect to saved WiFi credentials
   Serial.println("Attempting WiFi connection...");
 
