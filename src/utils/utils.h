@@ -8,11 +8,8 @@
 void allocateHistoryBuffer();
 
 // ========== Watchdog Functions ==========
-// Enable ESP32 watchdog timer
-void enableLoopWDT();
-
-// Feed the watchdog to prevent reset
-void feedLoopWDT();
+// Note: enableLoopWDT() and feedLoopWDT() are provided by the ESP32 Arduino framework
+// They are declared in esp32-hal.h and don't need to be redeclared here
 
 // ========== External Variables ==========
 extern float *tempHistory;

@@ -1,6 +1,5 @@
 #include "utils.h"
 #include "config/config.h"
-#include <esp_task_wdt.h>
 
 // ========== Memory Management ==========
 
@@ -42,14 +41,5 @@ void allocateHistoryBuffer() {
 }
 
 // ========== Watchdog Functions ==========
-
-void enableLoopWDT() {
-  // Enable the watchdog timer with 10 second timeout
-  esp_task_wdt_init(10, true);
-  esp_task_wdt_add(NULL);
-}
-
-void feedLoopWDT() {
-  // Reset the watchdog timer
-  esp_task_wdt_reset();
-}
+// Note: enableLoopWDT() and feedLoopWDT() are provided by the ESP32 Arduino framework
+// in esp32-hal-misc.c, so we don't need to implement them here.
