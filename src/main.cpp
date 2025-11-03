@@ -1477,24 +1477,26 @@ void setupWebServer() {
       }
   );
   
-  // Get JSON file
-  server.on("/get-json", HTTP_GET, [](AsyncWebServerRequest *request){
-      if(!request->hasParam("file")){
-          request->send(400, "application/json", "{\"success\":false}");
-          return;
-      }
-      String filename = request->getParam("file")->value();
-      String path = "/screens/" + filename;
-      File file = SD.open(path, FILE_READ);
-      if(!file){
-          request->send(404, "application/json", "{\"success\":false}");
-          return;
-      }
-      String content = file.readString();
-      file.close();
-      String response = "{\"success\":true,\"content\":" + content + "}";
-      request->send(200, "application/json", response);
-  });
+// Get JSON file - FIXED VERSION (prevents crash)
+server.on("/get-json", HTTP_GET, [](AsyncWebServerRequest *request){
+    if(!request->hasParam("file")){
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"No file\"}");
+        return;
+    }
+    
+    String filename = request->getParam("file")->value();
+    String path = "/screens/" + filename;
+    
+    File file = SD.open(path, FILE_READ);
+    if(!file){
+        request->send(404, "application/json", "{\"success\":false,\"message\":\"File not found\"}");
+        return;
+    }
+    
+    // Send file directly without parsing (prevents memory crash)
+    request->send(file, path, "application/json");
+    file.close();
+});
   
   // Save JSON file
   server.on("/save-json", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
@@ -1524,47 +1526,51 @@ void setupWebServer() {
       }
   );
   
-  // Editor page
-  server.on("/editor", HTTP_GET, [](AsyncWebServerRequest *request){
-      String html = "<!DOCTYPE html><html><head><title>JSON Editor</title>";
-      html += "<style>body{margin:0;background:#1a1a1a;color:#fff;font-family:monospace}";
-      html += ".container{display:flex;height:100vh}.sidebar{width:200px;background:#2a2a2a;padding:10px}";
-      html += ".editor{flex:1;display:flex;flex-direction:column;padding:10px}";
-      html += "textarea{flex:1;background:#0a0a0a;color:#0f0;border:1px solid #00bfff;padding:10px;font-family:monospace}";
-      html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;margin:5px;cursor:pointer}";
-      html += ".file-btn{background:#2a2a2a;color:#fff;padding:8px;margin:2px 0;width:100%;text-align:left}";
-      html += "#status{padding:10px;margin:10px 0}.success{background:#004d00;color:#0f0}";
-      html += ".error{background:#4d0000;color:#f00}</style></head><body>";
-      html += "<div class='container'><div class='sidebar'><h3>Files</h3>";
-      html += "<button class='file-btn' onclick=\"loadFile('monitor.json')\">monitor.json</button>";
-      html += "<button class='file-btn' onclick=\"loadFile('alignment.json')\">alignment.json</button>";
-      html += "<button class='file-btn' onclick=\"loadFile('graph.json')\">graph.json</button>";
-      html += "<button class='file-btn' onclick=\"loadFile('network.json')\">network.json</button></div>";
-      html += "<div class='editor'><h2 id='filename'>Select file</h2>";
-      html += "<textarea id='editor' placeholder='Load a JSON file...'></textarea><div>";
-      html += "<button onclick='saveFile()'>Save</button>";
-      html += "<button onclick='validate()'>Validate</button>";
-      html += "<button onclick='reload()'>Reload</button></div>";
-      html += "<div id='status'></div></div></div>";
-      html += "<script>let cf='';function show(m,t){document.getElementById('status').innerHTML=m;";
-      html += "document.getElementById('status').className=t}";
-      html += "function loadFile(f){cf=f;document.getElementById('filename').innerText='Editing: '+f;";
-      html += "fetch('/get-json?file='+f).then(r=>r.json()).then(d=>{if(d.success){";
-      html += "document.getElementById('editor').value=JSON.stringify(d.content,null,2);";
-      html += "show('Loaded','success')}else{show('Not found','error')}})}";
-      html += "function saveFile(){if(!cf){show('No file','error');return}";
-      html += "let c=document.getElementById('editor').value;try{JSON.parse(c)}catch(e){";
-      html += "show('Invalid JSON','error');return}";
-      html += "fetch('/save-json',{method:'POST',headers:{'Content-Type':'application/json'},";
-      html += "body:JSON.stringify({filename:cf,content:c})}).then(r=>r.json()).then(d=>{";
-      html += "if(d.success)show('Saved!','success');else show('Failed','error')})}";
-      html += "function validate(){try{let c=document.getElementById('editor').value;";
-      html += "let p=JSON.parse(c);show('Valid ('+p.elements.length+' elements)','success')}";
-      html += "catch(e){show('Invalid JSON','error')}}";
-      html += "function reload(){fetch('/api/reload-screens',{method:'POST'}).then(r=>r.json()).then(d=>{";
-      html += "show('Reloaded!','success')})}</script></body></html>";
-      request->send(200, "text/html", html);
-  });
+// Editor page - FIXED VERSION
+server.on("/editor", HTTP_GET, [](AsyncWebServerRequest *request){
+    String html = "<!DOCTYPE html><html><head><title>JSON Editor</title>";
+    html += "<style>body{margin:0;background:#1a1a1a;color:#fff;font-family:monospace}";
+    html += ".container{display:flex;height:100vh}.sidebar{width:200px;background:#2a2a2a;padding:10px}";
+    html += ".editor{flex:1;display:flex;flex-direction:column;padding:10px}";
+    html += "textarea{flex:1;background:#0a0a0a;color:#0f0;border:1px solid #00bfff;padding:10px;font-family:monospace;font-size:12px}";
+    html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;margin:5px;cursor:pointer}";
+    html += ".file-btn{background:#2a2a2a;color:#fff;padding:8px;margin:2px 0;width:100%;text-align:left;cursor:pointer}";
+    html += ".file-btn:hover{background:#3a3a3a}";
+    html += "#status{padding:10px;margin:10px 0}.success{background:#004d00;color:#0f0}";
+    html += ".error{background:#4d0000;color:#f00}</style></head><body>";
+    html += "<div class='container'><div class='sidebar'><h3>Files</h3>";
+    html += "<button class='file-btn' onclick=\"load('monitor.json')\">monitor.json</button>";
+    html += "<button class='file-btn' onclick=\"load('alignment.json')\">alignment.json</button>";
+    html += "<button class='file-btn' onclick=\"load('graph.json')\">graph.json</button>";
+    html += "<button class='file-btn' onclick=\"load('network.json')\">network.json</button></div>";
+    html += "<div class='editor'><h2 id='fn'>Select file</h2>";
+    html += "<textarea id='ed' placeholder='Load a JSON file...'></textarea><div>";
+    html += "<button onclick='save()'>Save</button>";
+    html += "<button onclick='check()'>Validate</button>";
+    html += "<button onclick='reload()'>Reload</button></div>";
+    html += "<div id='st'></div></div></div>";
+    html += "<script>let cf='';";
+    html += "function msg(m,t){document.getElementById('st').innerHTML=m;document.getElementById('st').className=t}";
+    html += "function load(f){cf=f;document.getElementById('fn').innerText='Editing: '+f;";
+    html += "fetch('/get-json?file='+f).then(r=>r.text()).then(txt=>{";
+    html += "try{let j=JSON.parse(txt);document.getElementById('ed').value=JSON.stringify(j,null,2);";
+    html += "msg('Loaded: '+f,'success')}catch(e){msg('Parse error','error')}})";
+    html += ".catch(e=>msg('Load failed','error'))}";
+    html += "function save(){if(!cf){msg('No file','error');return}";
+    html += "let c=document.getElementById('ed').value;try{JSON.parse(c)}catch(e){";
+    html += "msg('Invalid JSON','error');return}";
+    html += "fetch('/save-json',{method:'POST',headers:{'Content-Type':'application/json'},";
+    html += "body:JSON.stringify({filename:cf,content:c})}).then(r=>r.json()).then(d=>{";
+    html += "if(d.success)msg('Saved!','success');else msg('Save failed','error')})}";
+    html += "function check(){try{let c=document.getElementById('ed').value;";
+    html += "let p=JSON.parse(c);let ec=p.elements?p.elements.length:0;";
+    html += "msg('Valid JSON ('+ec+' elements)','success')}";
+    html += "catch(e){msg('Invalid: '+e.message,'error')}}";
+    html += "function reload(){fetch('/api/reload-screens',{method:'POST'}).then(r=>r.json())";
+    html += ".then(d=>msg('Layouts reloaded!','success'))";
+    html += ".catch(e=>msg('Reload failed','error'))}</script></body></html>";
+    request->send(200, "text/html", html);
+});
   
   // ========== END WEB JSON UPLOAD & EDITOR ==========
 
