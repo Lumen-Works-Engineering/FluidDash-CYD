@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FluidDash Screen Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        header .subtitle {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            gap: 1rem;
+            padding: 1rem;
+            overflow: hidden;
+        }
+
+        .toolbar {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            width: 350px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .toolbar-section {
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 1rem;
+        }
+
+        .toolbar-section:last-child {
+            border-bottom: none;
+        }
+
+        .toolbar-section h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .main-content {
+            display: flex;
+            gap: 1rem;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .canvas-wrapper {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 1rem;
+            flex: 1;
+            overflow: auto;
+            position: relative;
+        }
+
+        #canvas {
+            border: 2px solid #ddd;
+            background: white;
+            cursor: crosshair;
+            display: block;
+            margin: 0 auto;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.05);
+        }
+
+        .canvas-wrapper.drawing #canvas {
+            cursor: crosshair;
+        }
+
+        .properties-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            width: 300px;
+            overflow-y: auto;
+        }
+
+        .properties-panel h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .property-group {
+            margin-bottom: 1rem;
+        }
+
+        .property-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #666;
+            margin-bottom: 0.3rem;
+            display: block;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        input[type="color"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-family: inherit;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        input[type="color"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            padding: 0.7rem 1rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #f0f2f5;
+            color: #333;
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-danger {
+            background: #ff6b6b;
+            color: white;
+            width: 100%;
+        }
+
+        .btn-danger:hover {
+            background: #ee5a52;
+        }
+
+        .btn-small {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+            margin-right: 0.3rem;
+        }
+
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+        }
+
+        select.element-type {
+            background-color: #f8f9fa;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+        }
+
+        .status-message {
+            padding: 0.8rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .element-list {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .element-item {
+            padding: 0.6rem;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+        }
+
+        .element-item:last-child {
+            border-bottom: none;
+        }
+
+        .element-item:hover {
+            background: #e8f0ff;
+        }
+
+        .element-item.selected {
+            background: #667eea;
+            color: white;
+        }
+
+        .element-item .delete-btn {
+            padding: 0.2rem 0.4rem;
+            font-size: 0.75rem;
+            color: #999;
+            cursor: pointer;
+        }
+
+        .element-item.selected .delete-btn {
+            color: #ffcccc;
+        }
+
+        .element-item .delete-btn:hover {
+            color: #ff0000;
+        }
+
+        .schema-loading {
+            color: #999;
+            font-size: 0.85rem;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .no-selection {
+            color: #999;
+            text-align: center;
+            padding: 2rem 0;
+        }
+
+        .color-preview {
+            display: inline-block;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 4px;
+            margin-left: 0.5rem;
+            vertical-align: middle;
+            border: 1px solid #ddd;
+        }
+
+        @media (max-width: 1400px) {
+            .properties-panel {
+                width: 250px;
+            }
+        }
+
+        @media (max-width: 1000px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .toolbar {
+                width: 100%;
+                height: auto;
+                max-height: 200px;
+            }
+
+            .main-content {
+                flex-direction: column;
+            }
+
+            .properties-panel {
+                width: 100%;
+                height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🎨 FluidDash Screen Editor</h1>
+        <div class="subtitle">Visual Layout Designer for 480×320 Display</div>
+    </header>
+
+    <div class="container">
+        <!-- Left Toolbar: Tools and File Operations -->
+        <div class="toolbar">
+            <!-- Screen Info -->
+            <div class="toolbar-section">
+                <h3>Screen Info</h3>
+                <div class="property-group">
+                    <label class="property-label">Screen Name</label>
+                    <input type="text" id="screenName" placeholder="e.g., monitor" value="new_screen">
+                </div>
+                <div id="statusMessage"></div>
+            </div>
+
+            <!-- Element Tools -->
+            <div class="toolbar-section">
+                <h3>Add Elements</h3>
+                <div class="property-group">
+                    <label class="property-label">Element Type</label>
+                    <select id="elementType" class="element-type">
+                        <option value="">-- Select Element Type --</option>
+                        <option value="rect">Rectangle</option>
+                        <option value="line">Line</option>
+                        <option value="text">Static Text</option>
+                        <option value="dynamic">Dynamic Value</option>
+                    </select>
+                </div>
+                <button class="btn-secondary" onclick="startDrawing()">🖌️ Draw Element</button>
+            </div>
+
+            <!-- File Operations -->
+            <div class="toolbar-section">
+                <h3>File Operations</h3>
+                <button class="btn-primary" onclick="newScreen()" style="margin-bottom: 0.5rem;">📄 New Screen</button>
+                <div class="property-group">
+                    <label class="property-label">Load Existing Screen</label>
+                    <select id="screenSelector" onchange="loadScreenFromSelector()">
+                        <option value="">-- Loading screens... --</option>
+                    </select>
+                </div>
+                <button class="btn-secondary" onclick="loadScreen()">📂 Load</button>
+                <button class="btn-secondary" onclick="saveScreen()">💾 Save to Device</button>
+                <button class="btn-secondary" onclick="exportJSON()">📥 Export JSON</button>
+            </div>
+
+            <!-- Elements List -->
+            <div class="toolbar-section">
+                <h3>Elements on Canvas</h3>
+                <div class="element-list" id="elementsList"></div>
+            </div>
+        </div>
+
+        <!-- Center: Canvas -->
+        <div class="canvas-wrapper">
+            <canvas id="canvas" width="480" height="320"></canvas>
+        </div>
+
+        <!-- Right: Properties Panel -->
+        <div class="properties-panel">
+            <h3>Element Properties</h3>
+            <div id="propertiesContent">
+                <div class="no-selection">Select an element to edit</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // CONFIGURATION
+        // ============================================
+        const CANVAS_WIDTH = 480;
+        const CANVAS_HEIGHT = 320;
+        const API_BASE = '/api';
+
+        // ============================================
+        // STATE MANAGEMENT
+        // ============================================
+        let canvas, ctx;
+        let currentScreen = {
+            name: 'new_screen',
+            width: CANVAS_WIDTH,
+            height: CANVAS_HEIGHT,
+            elements: []
+        };
+        let selectedElementId = null;
+        let isDrawing = false;
+        let drawMode = null;
+        let drawStart = { x: 0, y: 0 };
+        let schema = {
+            elementTypes: [],
+            coordinates: [],
+            temperatures: [],
+            status: [],
+            system: [],
+            colors: {}
+        };
+
+        // ============================================
+        // INITIALIZATION
+        // ============================================
+        window.addEventListener('load', async () => {
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+
+            // Load dynamic schema from device
+            await loadSchema();
+
+            // Setup canvas events
+            setupCanvasEvents();
+
+            // Load available screens
+            await refreshScreenList();
+
+            // Initial render
+            redrawCanvas();
+        });
+
+        // ============================================
+        // SCHEMA LOADING (Dynamic Element Discovery)
+        // ============================================
+        async function loadSchema() {
+            try {
+                showStatus('Loading device configuration...', 'info');
+                const response = await fetch(API_BASE + '/schema/screen-elements');
+
+                if (!response.ok) {
+                    throw new Error('Failed to load schema');
+                }
+
+                schema = await response.json();
+                updateElementTypeDropdown();
+                showStatus('Device schema loaded successfully', 'success');
+            } catch (error) {
+                console.error('Error loading schema:', error);
+                showStatus('⚠️ Could not load device schema. Using defaults.', 'error');
+                // Use default schema if device is offline
+                loadDefaultSchema();
+            }
+        }
+
+        function loadDefaultSchema() {
+            schema = {
+                elementTypes: ['rect', 'line', 'text', 'dynamic', 'temp', 'status', 'progress', 'graph'],
+                coordinates: ['wposX', 'wposY', 'wposZ', 'wposA', 'posX', 'posY', 'posZ', 'posA'],
+                temperatures: ['temp0', 'temp1', 'temp2', 'temp3'],
+                status: ['machineState', 'feedRate', 'spindleRPM'],
+                system: ['psuVoltage', 'fanSpeed', 'ipAddress', 'ssid', 'deviceName', 'fluidncIP'],
+                colors: {
+                    'black': '0000',
+                    'white': 'FFFF',
+                    'red': 'F800',
+                    'green': '07E0',
+                    'blue': '001F',
+                    'yellow': 'FFE0',
+                    'cyan': '07FF',
+                    'magenta': 'F81F',
+                    'darkgray': '4A49'
+                }
+            };
+        }
+
+        function updateElementTypeDropdown() {
+            const select = document.getElementById('elementType');
+            // Keep current options, just update with any new types
+            schema.elementTypes.forEach(type => {
+                if (![...select.options].some(opt => opt.value === type)) {
+                    const option = document.createElement('option');
+                    option.value = type;
+                    option.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+                    select.appendChild(option);
+                }
+            });
+        }
+
+        // ============================================
+        // CANVAS DRAWING
+        // ============================================
+        function setupCanvasEvents() {
+            canvas.addEventListener('mousedown', onCanvasMouseDown);
+            canvas.addEventListener('mousemove', onCanvasMouseMove);
+            canvas.addEventListener('mouseup', onCanvasMouseUp);
+            canvas.addEventListener('click', onCanvasClick);
+        }
+
+        function onCanvasMouseDown(e) {
+            if (!isDrawing) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            drawStart = { x, y };
+        }
+
+        function onCanvasMouseMove(e) {
+            if (!isDrawing) return;
+
+            redrawCanvas();
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            ctx.strokeStyle = '#667eea';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+
+            if (drawMode === 'rect') {
+                const w = x - drawStart.x;
+                const h = y - drawStart.y;
+                ctx.strokeRect(drawStart.x, drawStart.y, w, h);
+            } else if (drawMode === 'line') {
+                ctx.beginPath();
+                ctx.moveTo(drawStart.x, drawStart.y);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
+
+            ctx.setLineDash([]);
+        }
+
+        function onCanvasMouseUp(e) {
+            if (!isDrawing) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const type = document.getElementById('elementType').value;
+            if (!type) {
+                showStatus('Please select an element type', 'error');
+                return;
+            }
+
+            // Create element
+            const element = {
+                id: generateId(),
+                type: type,
+                x: Math.min(drawStart.x, x),
+                y: Math.min(drawStart.y, y),
+                width: Math.abs(x - drawStart.x),
+                height: Math.abs(y - drawStart.y),
+                color: 'F800',
+                data: '',
+                text: '',
+                lineWidth: 2
+            };
+
+            currentScreen.elements.push(element);
+            isDrawing = false;
+            document.querySelector('.canvas-wrapper').classList.remove('drawing');
+
+            redrawCanvas();
+            updateElementsList();
+            selectElement(element.id);
+            showStatus('Element added', 'success');
+        }
+
+        function onCanvasClick(e) {
+            if (isDrawing) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Find clicked element (last one wins for overlap)
+            let clicked = null;
+            for (let i = currentScreen.elements.length - 1; i >= 0; i--) {
+                const el = currentScreen.elements[i];
+                if (x >= el.x && x <= el.x + el.width &&
+                    y >= el.y && y <= el.y + el.height) {
+                    clicked = el;
+                    break;
+                }
+            }
+
+            if (clicked) {
+                selectElement(clicked.id);
+            } else {
+                selectElement(null);
+            }
+        }
+
+        // ============================================
+        // SCREEN MANAGEMENT
+        // ============================================
+        function newScreen() {
+            currentScreen = {
+                name: document.getElementById('screenName').value || 'new_screen',
+                width: CANVAS_WIDTH,
+                height: CANVAS_HEIGHT,
+                elements: []
+            };
+            selectedElementId = null;
+            redrawCanvas();
+            updateElementsList();
+            updatePropertiesPanel();
+            showStatus('New screen created', 'success');
+        }
+
+        async function loadScreen() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                const text = await file.text();
+                try {
+                    currentScreen = JSON.parse(text);
+                    document.getElementById('screenName').value = currentScreen.name;
+                    selectedElementId = null;
+                    redrawCanvas();
+                    updateElementsList();
+                    updatePropertiesPanel();
+                    showStatus('Screen loaded successfully', 'success');
+                } catch (error) {
+                    showStatus('Invalid JSON file', 'error');
+                }
+            };
+            input.click();
+        }
+
+        async function saveScreen() {
+            currentScreen.name = document.getElementById('screenName').value || 'new_screen';
+
+            try {
+                showStatus('Saving to device...', 'info');
+                const response = await fetch(API_BASE + '/upload-screen', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        filename: currentScreen.name + '.json',
+                        data: currentScreen
+                    })
+                });
+
+                if (response.ok) {
+                    showStatus('✅ Screen saved to device!', 'success');
+                    await refreshScreenList();
+                } else {
+                    showStatus('Failed to save screen', 'error');
+                }
+            } catch (error) {
+                showStatus('Connection error: ' + error.message, 'error');
+            }
+        }
+
+        function exportJSON() {
+            currentScreen.name = document.getElementById('screenName').value || 'new_screen';
+
+            const json = JSON.stringify(currentScreen, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = currentScreen.name + '.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            showStatus('JSON exported', 'success');
+        }
+
+        async function refreshScreenList() {
+            try {
+                const response = await fetch(API_BASE + '/screens');
+                if (!response.ok) throw new Error('Failed to load screens');
+
+                const data = await response.json();
+                const selector = document.getElementById('screenSelector');
+                selector.innerHTML = '<option value="">-- Select Screen --</option>';
+
+                if (data.files && data.files.length > 0) {
+                    data.files.forEach(file => {
+                        const option = document.createElement('option');
+                        option.value = file.name;
+                        option.textContent = file.name;
+                        selector.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading screen list:', error);
+            }
+        }
+
+        async function loadScreenFromSelector() {
+            const filename = document.getElementById('screenSelector').value;
+            if (!filename) return;
+
+            try {
+                showStatus('Loading...', 'info');
+                const response = await fetch(API_BASE + '/screens/' + filename);
+                if (!response.ok) throw new Error('Failed to load screen');
+
+                currentScreen = await response.json();
+                document.getElementById('screenName').value = currentScreen.name;
+                selectedElementId = null;
+                redrawCanvas();
+                updateElementsList();
+                updatePropertiesPanel();
+                showStatus('Screen loaded', 'success');
+            } catch (error) {
+                showStatus('Error loading screen: ' + error.message, 'error');
+            }
+        }
+
+        // ============================================
+        // ELEMENT MANAGEMENT
+        // ============================================
+        function startDrawing() {
+            const type = document.getElementById('elementType').value;
+            if (!type) {
+                showStatus('Select an element type first', 'error');
+                return;
+            }
+            isDrawing = true;
+            drawMode = type;
+            document.querySelector('.canvas-wrapper').classList.add('drawing');
+            showStatus('Draw on canvas - click and drag', 'info');
+        }
+
+        function selectElement(id) {
+            selectedElementId = id;
+            updateElementsList();
+            updatePropertiesPanel();
+            redrawCanvas();
+        }
+
+        function deleteElement(id) {
+            currentScreen.elements = currentScreen.elements.filter(el => el.id !== id);
+            if (selectedElementId === id) {
+                selectedElementId = null;
+            }
+            updateElementsList();
+            updatePropertiesPanel();
+            redrawCanvas();
+            showStatus('Element deleted', 'success');
+        }
+
+        function updateElementsList() {
+            const list = document.getElementById('elementsList');
+            if (currentScreen.elements.length === 0) {
+                list.innerHTML = '<div style="color: #999; padding: 1rem; text-align: center;">No elements</div>';
+                return;
+            }
+
+            list.innerHTML = currentScreen.elements.map(el => `
+                <div class="element-item ${el.id === selectedElementId ? 'selected' : ''}"
+                     onclick="selectElement('${el.id}')">
+                    <span>${el.type} #${el.id.substring(0, 5)}</span>
+                    <span class="delete-btn" onclick="event.stopPropagation(); deleteElement('${el.id}')">✕</span>
+                </div>
+            `).join('');
+        }
+
+        // ============================================
+        // PROPERTIES PANEL
+        // ============================================
+        function updatePropertiesPanel() {
+            const content = document.getElementById('propertiesContent');
+
+            if (!selectedElementId) {
+                content.innerHTML = '<div class="no-selection">Select an element to edit</div>';
+                return;
+            }
+
+            const element = currentScreen.elements.find(el => el.id === selectedElementId);
+            if (!element) return;
+
+            const dataOptions = [
+                { group: 'Coordinates', items: schema.coordinates },
+                { group: 'Temperatures', items: schema.temperatures },
+                { group: 'Status', items: schema.status },
+                { group: 'System', items: schema.system }
+            ];
+
+            const dataSelect = dataOptions.map(group => 
+                `<optgroup label="${group.group}">
+                    ${group.items.map(item => `
+                        <option value="${item}" ${element.data === item ? 'selected' : ''}>
+                            ${item}
+                        </option>
+                    `).join('')}
+                </optgroup>`
+            ).join('');
+
+            content.innerHTML = `
+                <div class="property-group">
+                    <label class="property-label">Element Type</label>
+                    <input type="text" value="${element.type}" readonly style="background: #f0f0f0;">
+                </div>
+
+                <div class="property-group">
+                    <label class="property-label">Position X</label>
+                    <input type="number" value="${element.x}" 
+                           onchange="updateElementProperty(selectedElementId, 'x', parseInt(this.value))">
+                </div>
+
+                <div class="property-group">
+                    <label class="property-label">Position Y</label>
+                    <input type="number" value="${element.y}" 
+                           onchange="updateElementProperty(selectedElementId, 'y', parseInt(this.value))">
+                </div>
+
+                <div class="property-group">
+                    <label class="property-label">Width</label>
+                    <input type="number" value="${element.width}" 
+                           onchange="updateElementProperty(selectedElementId, 'width', parseInt(this.value))">
+                </div>
+
+                <div class="property-group">
+                    <label class="property-label">Height</label>
+                    <input type="number" value="${element.height}" 
+                           onchange="updateElementProperty(selectedElementId, 'height', parseInt(this.value))">
+                </div>
+
+                ${element.type === 'text' || element.type === 'dynamic' ? `
+                <div class="property-group">
+                    <label class="property-label">Text</label>
+                    <input type="text" value="${element.text || ''}" 
+                           onchange="updateElementProperty(selectedElementId, 'text', this.value)">
+                </div>
+                ` : ''}
+
+                ${element.type === 'dynamic' ? `
+                <div class="property-group">
+                    <label class="property-label">Data Source</label>
+                    <select onchange="updateElementProperty(selectedElementId, 'data', this.value)">
+                        <option value="">-- Select Data Source --</option>
+                        ${dataSelect}
+                    </select>
+                </div>
+                ` : ''}
+
+                <div class="property-group">
+                    <label class="property-label">Color (RGB565)</label>
+                    <input type="text" value="${element.color}" placeholder="e.g., F800" 
+                           style="font-family: monospace;"
+                           onchange="updateElementProperty(selectedElementId, 'color', this.value.toUpperCase())">
+                </div>
+
+                <div class="property-group">
+                    <label class="property-label">Line Width</label>
+                    <input type="number" value="${element.lineWidth || 1}" min="1" max="10"
+                           onchange="updateElementProperty(selectedElementId, 'lineWidth', parseInt(this.value))">
+                </div>
+
+                <button class="btn-danger" onclick="deleteElement('${element.id}')">Delete Element</button>
+            `;
+        }
+
+        function updateElementProperty(id, prop, value) {
+            const element = currentScreen.elements.find(el => el.id === id);
+            if (element) {
+                element[prop] = value;
+                redrawCanvas();
+                updatePropertiesPanel();
+            }
+        }
+
+        // ============================================
+        // CANVAS RENDERING
+        // ============================================
+        function redrawCanvas() {
+            // Clear canvas
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Draw border
+            ctx.strokeStyle = '#ddd';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Draw elements
+            currentScreen.elements.forEach(element => {
+                const isSelected = element.id === selectedElementId;
+                drawElement(element, isSelected);
+            });
+        }
+
+        function drawElement(element, isSelected) {
+            const color = '#' + element.color;
+            const lineWidth = element.lineWidth || 2;
+
+            ctx.lineWidth = lineWidth;
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+
+            switch (element.type) {
+                case 'rect':
+                    ctx.strokeRect(element.x, element.y, element.width, element.height);
+                    break;
+                case 'line':
+                    ctx.beginPath();
+                    ctx.moveTo(element.x, element.y);
+                    ctx.lineTo(element.x + element.width, element.y + element.height);
+                    ctx.stroke();
+                    break;
+                case 'text':
+                case 'dynamic':
+                case 'temp':
+                case 'status':
+                case 'progress':
+                case 'graph':
+                    ctx.font = '12px Arial';
+                    ctx.fillText(element.text || element.data || element.type, element.x + 2, element.y + 15);
+                    break;
+            }
+
+            // Draw selection highlight
+            if (isSelected) {
+                ctx.strokeStyle = '#667eea';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(element.x - 5, element.y - 5, element.width + 10, element.height + 10);
+                ctx.setLineDash([]);
+
+                // Draw corner handles
+                const handleSize = 6;
+                ctx.fillStyle = '#667eea';
+                const corners = [
+                    [element.x - 3, element.y - 3],
+                    [element.x + element.width - 3, element.y - 3],
+                    [element.x - 3, element.y + element.height - 3],
+                    [element.x + element.width - 3, element.y + element.height - 3]
+                ];
+                corners.forEach(([x, y]) => {
+                    ctx.fillRect(x, y, handleSize, handleSize);
+                });
+            }
+        }
+
+        // ============================================
+        // UTILITY FUNCTIONS
+        // ============================================
+        function generateId() {
+            return 'el_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.innerHTML = `<div class="status-message status-${type}">${message}</div>`;
+            setTimeout(() => {
+                statusEl.innerHTML = '';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

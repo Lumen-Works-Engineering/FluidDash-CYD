@@ -24,8 +24,8 @@ void connectFluidNC() {
                   cfg.fluidnc_ip, cfg.fluidnc_port);
     webSocket.begin(cfg.fluidnc_ip, cfg.fluidnc_port, "/ws");  // Add /ws path
     webSocket.onEvent(fluidNCWebSocketEvent);
-    webSocket.setReconnectInterval(5000);
-    Serial.println("[FluidNC] WebSocket initialized, waiting for connection...");
+    webSocket.setReconnectInterval(10000);  // 10 seconds between reconnect attempts
+    Serial.println("[FluidNC] WebSocket initialized (reconnect: 10s), device can run without FluidNC");
 }
 
 void discoverFluidNC() {

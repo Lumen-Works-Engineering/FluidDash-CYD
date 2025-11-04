@@ -844,9 +844,45 @@ void loop() {
     lastHistoryUpdate = millis();
   }
 
+  // FluidNC WebSocket handling - throttled to prevent watchdog issues
   if (WiFi.status() == WL_CONNECTED) {
-      webSocket.loop();
-      
+      static unsigned long lastWebSocketLoop = 0;
+      static unsigned long connectionAttemptStart = 0;
+      static unsigned long lastConnectionAttempt = 0;
+      static bool attemptingConnection = false;
+
+      // Throttle webSocket.loop() calls to prevent blocking
+      // Only call it every 100ms instead of every loop iteration
+      if (millis() - lastWebSocketLoop >= 100) {
+          // Track if we're in a connection attempt that might block
+          if (!fluidncConnected && !attemptingConnection) {
+              connectionAttemptStart = millis();
+              attemptingConnection = true;
+          }
+
+          webSocket.loop();
+          lastWebSocketLoop = millis();
+
+          // If connection succeeds, reset attempt tracking
+          if (fluidncConnected && attemptingConnection) {
+              attemptingConnection = false;
+              lastConnectionAttempt = 0;
+          }
+
+          // If we've been disconnected for more than 30 seconds, slow down retry
+          if (!fluidncConnected && attemptingConnection) {
+              unsigned long attemptDuration = millis() - connectionAttemptStart;
+              if (attemptDuration > 30000) {
+                  // After 30 seconds of failed attempts, only retry every 10 seconds
+                  if (millis() - lastConnectionAttempt < 10000) {
+                      // Skip this loop call to reduce connection attempts
+                      attemptingConnection = false;
+                      lastConnectionAttempt = millis();
+                  }
+              }
+          }
+      }
+
       // Always poll for status - FluidNC doesn't have automatic reporting
       if (fluidncConnected && (millis() - lastStatusRequest >= cfg.status_update_rate)) {
           if (debugWebSocket) {
@@ -855,12 +891,12 @@ void loop() {
           webSocket.sendTXT("?");
           lastStatusRequest = millis();
       }
-      
+
       // Periodic debug output (only every 10 seconds now)
       static unsigned long lastDebug = 0;
       if (debugWebSocket && millis() - lastDebug >= 10000) {
-          Serial.printf("[DEBUG] State:%s MPos:(%.2f,%.2f,%.2f,%.2f) WPos:(%.2f,%.2f,%.2f,%.2f)\n", 
-                        machineState.c_str(), 
+          Serial.printf("[DEBUG] State:%s MPos:(%.2f,%.2f,%.2f,%.2f) WPos:(%.2f,%.2f,%.2f,%.2f)\n",
+                        machineState.c_str(),
                         posX, posY, posZ, posA,
                         wposX, wposY, wposZ, wposA);
           lastDebug = millis();
@@ -1052,78 +1088,41 @@ void setupWebServer() {
   });
     // ========== WEB JSON UPLOAD & EDITOR ==========
   
-  // Upload page
+  // Upload page - Disabled, show instructions
   server.on("/upload", HTTP_GET, [](AsyncWebServerRequest *request){
       String html = "<!DOCTYPE html><html><head><title>Upload JSON</title>";
       html += "<style>body{font-family:Arial;margin:20px;background:#1a1a1a;color:#fff}";
-      html += "h1{color:#00bfff}.box{background:#2a2a2a;padding:20px;border-radius:8px;max-width:600px}";
-      html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;cursor:pointer}";
-      html += "#status{margin-top:20px;padding:10px}.success{background:#004d00;color:#0f0}";
-      html += ".error{background:#4d0000;color:#f00}</style></head><body>";
-      html += "<h1>Upload JSON</h1><div class='box'><h3>Upload Screen Layout</h3>";
-      html += "<form id='f' enctype='multipart/form-data'>";
-      html += "<input type='file' id='file' accept='.json' required><br><br>";
-      html += "<button type='submit'>Upload</button></form>";
-      html += "<div id='status'></div></div>";
-      html += "<script>document.getElementById('f').addEventListener('submit',function(e){";
-      html += "e.preventDefault();let file=document.getElementById('file').files[0];";
-      html += "if(!file)return;let s=document.getElementById('status');";
-      html += "s.innerHTML='Uploading...';s.className='';let fd=new FormData();";
-      html += "fd.append('file',file);fetch('/upload-json',{method:'POST',body:fd})";
-      html += ".then(r=>r.json()).then(d=>{if(d.success){s.innerHTML='Uploaded!';";
-      html += "s.className='success';fetch('/api/reload-screens',{method:'POST'})}";
-      html += "else{s.innerHTML='Error';s.className='error'}})";
-      html += ".catch(e=>{s.innerHTML='Failed';s.className='error'})});</script>";
-      html += "</body></html>";
+      html += "h1{color:#ff6600}.box{background:#2a2a2a;padding:20px;border-radius:8px;max-width:700px}";
+      html += "code{background:#1a1a1a;padding:2px 5px;border-radius:3px;color:#00bfff}";
+      html += "a{color:#00bfff;text-decoration:none}ul{line-height:1.8}</style></head><body>";
+      html += "<h1>JSON Upload Temporarily Disabled</h1><div class='box'>";
+      html += "<h3>Why is upload disabled?</h3>";
+      html += "<p>The ESP32 SD card library has thread-safety issues with the async web server. ";
+      html += "File operations from web callbacks cause crashes.</p>";
+      html += "<h3>How to update JSON files:</h3>";
+      html += "<ol><li>Remove SD card from device</li>";
+      html += "<li>Insert into computer SD card reader</li>";
+      html += "<li>Edit files in <code>/screens/</code> folder</li>";
+      html += "<li>Re-insert SD card into device</li>";
+      html += "<li>Use <a href='/api/reload-screens'>Reload Screens API</a> or reboot</li></ol>";
+      html += "<h3>Current JSON files:</h3>";
+      html += "<ul><li>monitor.json - Main monitoring screen</li>";
+      html += "<li>alignment.json - Axis alignment view</li>";
+      html += "<li>graph.json - Temperature graphs</li>";
+      html += "<li>network.json - Network information</li></ul>";
+      html += "<p><a href='/'>Back to Dashboard</a></p>";
+      html += "</div></body></html>";
       request->send(200, "text/html", html);
   });
   
-  // Handle file upload (fixed memory management)
+  // Handle file upload - DISABLED
+  // ESP32 SD library has critical thread-safety issues with AsyncWebServer
+  // SD.open() crashes when called from async callbacks running on different cores
+  // TODO: Implement proper solution with FreeRTOS semaphore or move to SPIFFS
   server.on("/upload-json", HTTP_POST,
       [](AsyncWebServerRequest *request){
-          request->send(200, "application/json", "{\"success\":true}");
-      },
-      [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
-          static File uploadFile;
-          static bool uploadError = false;
-
-          if(index == 0){
-              uploadError = false;
-              // Close any previously open file
-              if(uploadFile) uploadFile.close();
-
-              if(!filename.endsWith(".json")){
-                  Serial.println("[Upload] Not a JSON file");
-                  uploadError = true;
-                  return;
-              }
-
-              String path = "/screens/" + filename;
-              uploadFile = SD.open(path, FILE_WRITE);
-              if(!uploadFile){
-                  Serial.printf("[Upload] Cannot create %s\n", path.c_str());
-                  uploadError = true;
-                  return;
-              }
-              Serial.printf("[Upload] Starting: %s\n", filename.c_str());
-          }
-
-          if(!uploadError && uploadFile && len){
-              size_t written = uploadFile.write(data, len);
-              if(written != len){
-                  Serial.println("[Upload] Write error");
-                  uploadError = true;
-              }
-          }
-
-          if(final){
-              if(uploadFile){
-                  uploadFile.close();
-                  if(!uploadError){
-                      Serial.printf("[Upload] Complete: %s\n", filename.c_str());
-                  }
-              }
-          }
+          request->send(503, "application/json",
+              "{\"success\":false,\"message\":\"Upload disabled - ESP32 SD library not thread-safe with AsyncWebServer. Use SD card reader to update files.\"}");
       }
   );
   

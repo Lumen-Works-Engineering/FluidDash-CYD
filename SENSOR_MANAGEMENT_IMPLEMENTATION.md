@@ -1,6 +1,7 @@
 # DS18B20 Sensor Management System - Implementation Guide
 
 ## Project: FluidDash CYD Edition - Temperature Sensor Configuration
+
 **Date:** November 3, 2025
 **Priority:** HIGH - Foundation for scalable sensor management
 
@@ -9,6 +10,7 @@
 ## Overview
 
 Implement a complete sensor identification and configuration system that allows users to:
+
 1. Discover all DS18B20 sensors on the OneWire bus
 2. Identify individual sensors by touching them (temperature rise detection)
 3. Assign friendly names and aliases (temp0, temp1, etc.)
@@ -16,12 +18,14 @@ Implement a complete sensor identification and configuration system that allows 
 5. Access via web interface at /sensors
 
 ### Current State
+
 - Sensors module exists in `src/sensors/`
 - DS18B20 code reads temperatures by index (temp0, temp1, temp2, temp3)
 - No UID-to-name mapping
 - No web interface for sensor configuration
 
 ### Expected Outcome
+
 - sensor_config.json file on SD card maps UIDs to names
 - Web interface at /sensors for configuration
 - Touch-based sensor identification
@@ -35,6 +39,7 @@ Implement a complete sensor identification and configuration system that allows 
 ### Step 1.1: Create sensor_config.json Structure
 
 Create a new file in `/sd_card/config/sensor_config.json` with this structure:
+
 ```json
 {
   "version": "1.0",
@@ -53,6 +58,7 @@ Create a new file in `/sd_card/config/sensor_config.json` with this structure:
 ### Step 1.2: Add Sensor Mapping Structure to sensors.h
 
 Add to `src/sensors/sensors.h`:
+
 ```cpp
 struct SensorMapping {
     uint8_t uid[8];           // 64-bit DS18B20 ROM address
@@ -81,6 +87,7 @@ void stringToUID(const String& str, uint8_t uid[8]);
 ### Step 1.3: Implement Config Load/Save Functions
 
 Add to `src/sensors/sensors.cpp`:
+
 ```cpp
 std::vector<SensorMapping> sensorMappings;
 
@@ -181,6 +188,7 @@ void stringToUID(const String& str, uint8_t uid[8]) {
 ### Step 2.1: Add OneWire Discovery Function
 
 Add to `src/sensors/sensors.cpp`:
+
 ```cpp
 std::vector<String> getDiscoveredUIDs() {
     std::vector<String> uids;
@@ -240,6 +248,7 @@ float getTempByAlias(const String& alias) {
 ### Step 3.1: Implement Temperature Change Detection
 
 Add to `src/sensors/sensors.h`:
+
 ```cpp
 struct TempMonitor {
     uint8_t uid[8];
@@ -252,6 +261,7 @@ String detectTouchedSensor(unsigned long timeoutMs, float thresholdDelta = 1.0);
 ```
 
 Add to `src/sensors/sensors.cpp`:
+
 ```cpp
 String detectTouchedSensor(unsigned long timeoutMs, float thresholdDelta) {
     std::vector<TempMonitor> monitors;
@@ -306,6 +316,7 @@ String detectTouchedSensor(unsigned long timeoutMs, float thresholdDelta) {
 ### Step 4.1: Add /sensors Route to main.cpp
 
 In `src/main.cpp`, find the web server initialization section and add:
+
 ```cpp
 // Sensor configuration page
 server.on("/sensors", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -423,6 +434,7 @@ server.on("/api/sensors/delete", HTTP_POST, [](AsyncWebServerRequest *request){
 ### Step 4.2: Implement addSensorMapping and removeSensorMapping
 
 Add to `src/sensors/sensors.cpp`:
+
 ```cpp
 bool addSensorMapping(const uint8_t uid[8], const String& name, const String& alias) {
     // Check if alias already exists
@@ -482,6 +494,7 @@ int getSensorCount() {
 ### Step 5.1: Create getSensorConfigHTML() Function
 
 Add new file or section in main.cpp (or create webserver module):
+
 ```cpp
 String getSensorConfigHTML() {
     String html = R"(
@@ -747,6 +760,7 @@ String getSensorConfigHTML() {
 ### Step 6.1: Update Display Rendering to Use Aliases
 
 In `src/display/display.cpp`, find the temperature rendering function and update:
+
 ```cpp
 void renderTemperatureElement(JsonObject element) {
     String alias = element["data"];  // e.g., "temp0"
@@ -770,6 +784,7 @@ void renderTemperatureElement(JsonObject element) {
 ### Step 6.2: Call loadSensorConfig() at Startup
 
 In `src/main.cpp` setup() function, add after SD card initialization:
+
 ```cpp
 void setup() {
     // ... existing setup code ...
@@ -796,6 +811,7 @@ void setup() {
 ### Test Cases
 
 **Test 1: Fresh Installation**
+
 1. Delete sensor_config.json from SD card
 2. Reboot ESP32
 3. Verify empty config file is created
@@ -803,18 +819,21 @@ void setup() {
 5. Verify all sensors show as "unconfigured"
 
 **Test 2: Sensor Identification**
+
 1. Click "Identify & Configure" on any sensor
 2. Touch different sensors one at a time
 3. Verify correct UID is detected each time
 4. Verify temperature rise is shown in logs
 
 **Test 3: Configuration Persistence**
+
 1. Configure all 4 sensors with names
 2. Reboot ESP32
 3. Verify sensor names persist after reboot
 4. Verify display shows correct temperatures by alias
 
 **Test 4: Adding New Sensors**
+
 1. Add a 5th DS18B20 to the bus
 2. Click "Scan for Sensors"
 3. Verify new sensor appears as unconfigured
@@ -822,6 +841,7 @@ void setup() {
 5. Update screen JSON to display temp4
 
 **Test 5: Error Handling**
+
 1. Unplug a configured sensor
 2. Verify display shows "N/A" for that sensor
 3. Plug it back in
@@ -847,6 +867,7 @@ void setup() {
 After implementation, create a report with:
 
 ### Implementation Summary
+
 - Files modified:
 - Functions added:
 - Compilation status:
@@ -854,6 +875,7 @@ After implementation, create a report with:
 - Memory usage: (Flash: XX KB, RAM: XX KB)
 
 ### Testing Results
+
 - Test 1: [PASS/FAIL]
 - Test 2: [PASS/FAIL]
 - Test 3: [PASS/FAIL]
@@ -861,9 +883,11 @@ After implementation, create a report with:
 - Test 5: [PASS/FAIL]
 
 ### Issues Encountered
+
 - (List any problems and resolutions)
 
 ### Next Steps
+
 - (Suggestions for future enhancements)
 
 ---
@@ -871,21 +895,25 @@ After implementation, create a report with:
 ## Common Issues & Solutions
 
 **Issue: Sensors not discovered**
+
 - Check OneWire pin connection (GPIO XX)
 - Verify 4.7kΩ pull-up resistor on data line
 - Test with DS18B20 example sketch first
 
 **Issue: Touch detection not working**
+
 - Increase threshold from 1.0°C to 1.5°C
 - Increase timeout from 15s to 30s
 - Ensure good thermal contact with sensor
 
 **Issue: JSON parse error**
+
 - Increase StaticJsonDocument size if >10 sensors
 - Check SD card has enough space
 - Verify JSON syntax with online validator
 
 **Issue: Web page not loading**
+
 - Check PROGMEM optimization didn't break HTML string
 - Verify AsyncWebServer handles POST body correctly
 - Check Serial monitor for errors
@@ -899,4 +927,3 @@ After implementation, create a report with:
 3. **Sensor Health Monitoring**: Alert if temperature change is abnormal
 4. **Auto-assignment**: Suggest next available alias automatically
 5. **Batch Configuration**: Configure multiple sensors in one session
-
