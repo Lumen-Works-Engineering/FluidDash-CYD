@@ -13,7 +13,8 @@
       "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run)",
       "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" device monitor --port COM9)",
       "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run --target upload)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run --target compile)"
     ],
     "deny": [],
     "ask": []

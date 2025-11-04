@@ -1078,55 +1078,64 @@ void setupWebServer() {
       request->send(200, "text/html", html);
   });
   
-  // Handle file upload
-  server.on("/upload-json", HTTP_POST, 
-      [](AsyncWebServerRequest *request){ request->send(200); },
+  // Handle file upload (fixed memory management)
+  server.on("/upload-json", HTTP_POST,
+      [](AsyncWebServerRequest *request){
+          request->send(200, "application/json", "{\"success\":true}");
+      },
       [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
           static File uploadFile;
+          static bool uploadError = false;
+
           if(index == 0){
+              uploadError = false;
+              // Close any previously open file
+              if(uploadFile) uploadFile.close();
+
               if(!filename.endsWith(".json")){
                   Serial.println("[Upload] Not a JSON file");
+                  uploadError = true;
                   return;
               }
+
               String path = "/screens/" + filename;
               uploadFile = SD.open(path, FILE_WRITE);
               if(!uploadFile){
                   Serial.printf("[Upload] Cannot create %s\n", path.c_str());
+                  uploadError = true;
                   return;
               }
+              Serial.printf("[Upload] Starting: %s\n", filename.c_str());
           }
-          if(uploadFile && len){
-              uploadFile.write(data, len);
+
+          if(!uploadError && uploadFile && len){
+              size_t written = uploadFile.write(data, len);
+              if(written != len){
+                  Serial.println("[Upload] Write error");
+                  uploadError = true;
+              }
           }
-          if(final && uploadFile){
-              uploadFile.close();
-              Serial.printf("[Upload] Complete: %s\n", filename.c_str());
+
+          if(final){
+              if(uploadFile){
+                  uploadFile.close();
+                  if(!uploadError){
+                      Serial.printf("[Upload] Complete: %s\n", filename.c_str());
+                  }
+              }
           }
       }
   );
   
-// Get JSON file - FIXED VERSION (prevents crash)
-server.on("/get-json", HTTP_GET, [](AsyncWebServerRequest *request){
-    if(!request->hasParam("file")){
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"No file\"}");
-        return;
-    }
-    
-    String filename = request->getParam("file")->value();
-    String path = "/screens/" + filename;
-    
-    File file = SD.open(path, FILE_READ);
-    if(!file){
-        request->send(404, "application/json", "{\"success\":false,\"message\":\"File not found\"}");
-        return;
-    }
-    
-    // Send file directly without parsing (prevents memory crash)
-    request->send(file, path, "application/json");
-    file.close();
-});
+  // Get JSON file - DISABLED (was causing crashes)
+  server.on("/get-json", HTTP_GET, [](AsyncWebServerRequest *request){
+      request->send(503, "application/json", "{\"success\":false,\"message\":\"Endpoint disabled - causing crashes\"}");
+  });
   
-  // Save JSON file
+  // Save JSON file - DISABLED (use /upload instead)
+  // This endpoint was causing memory issues and crashes
+  // Use the /upload page for file uploads instead
+  /*
   server.on("/save-json", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
       [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
           static String jsonData;
@@ -1153,52 +1162,22 @@ server.on("/get-json", HTTP_GET, [](AsyncWebServerRequest *request){
           }
       }
   );
+  */
   
-// Editor page - FIXED VERSION
-server.on("/editor", HTTP_GET, [](AsyncWebServerRequest *request){
-    String html = "<!DOCTYPE html><html><head><title>JSON Editor</title>";
-    html += "<style>body{margin:0;background:#1a1a1a;color:#fff;font-family:monospace}";
-    html += ".container{display:flex;height:100vh}.sidebar{width:200px;background:#2a2a2a;padding:10px}";
-    html += ".editor{flex:1;display:flex;flex-direction:column;padding:10px}";
-    html += "textarea{flex:1;background:#0a0a0a;color:#0f0;border:1px solid #00bfff;padding:10px;font-family:monospace;font-size:12px}";
-    html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;margin:5px;cursor:pointer}";
-    html += ".file-btn{background:#2a2a2a;color:#fff;padding:8px;margin:2px 0;width:100%;text-align:left;cursor:pointer}";
-    html += ".file-btn:hover{background:#3a3a3a}";
-    html += "#status{padding:10px;margin:10px 0}.success{background:#004d00;color:#0f0}";
-    html += ".error{background:#4d0000;color:#f00}</style></head><body>";
-    html += "<div class='container'><div class='sidebar'><h3>Files</h3>";
-    html += "<button class='file-btn' onclick=\"load('monitor.json')\">monitor.json</button>";
-    html += "<button class='file-btn' onclick=\"load('alignment.json')\">alignment.json</button>";
-    html += "<button class='file-btn' onclick=\"load('graph.json')\">graph.json</button>";
-    html += "<button class='file-btn' onclick=\"load('network.json')\">network.json</button></div>";
-    html += "<div class='editor'><h2 id='fn'>Select file</h2>";
-    html += "<textarea id='ed' placeholder='Load a JSON file...'></textarea><div>";
-    html += "<button onclick='save()'>Save</button>";
-    html += "<button onclick='check()'>Validate</button>";
-    html += "<button onclick='reload()'>Reload</button></div>";
-    html += "<div id='st'></div></div></div>";
-    html += "<script>let cf='';";
-    html += "function msg(m,t){document.getElementById('st').innerHTML=m;document.getElementById('st').className=t}";
-    html += "function load(f){cf=f;document.getElementById('fn').innerText='Editing: '+f;";
-    html += "fetch('/get-json?file='+f).then(r=>r.text()).then(txt=>{";
-    html += "try{let j=JSON.parse(txt);document.getElementById('ed').value=JSON.stringify(j,null,2);";
-    html += "msg('Loaded: '+f,'success')}catch(e){msg('Parse error','error')}})";
-    html += ".catch(e=>msg('Load failed','error'))}";
-    html += "function save(){if(!cf){msg('No file','error');return}";
-    html += "let c=document.getElementById('ed').value;try{JSON.parse(c)}catch(e){";
-    html += "msg('Invalid JSON','error');return}";
-    html += "fetch('/save-json',{method:'POST',headers:{'Content-Type':'application/json'},";
-    html += "body:JSON.stringify({filename:cf,content:c})}).then(r=>r.json()).then(d=>{";
-    html += "if(d.success)msg('Saved!','success');else msg('Save failed','error')})}";
-    html += "function check(){try{let c=document.getElementById('ed').value;";
-    html += "let p=JSON.parse(c);let ec=p.elements?p.elements.length:0;";
-    html += "msg('Valid JSON ('+ec+' elements)','success')}";
-    html += "catch(e){msg('Invalid: '+e.message,'error')}}";
-    html += "function reload(){fetch('/api/reload-screens',{method:'POST'}).then(r=>r.json())";
-    html += ".then(d=>msg('Layouts reloaded!','success'))";
-    html += ".catch(e=>msg('Reload failed','error'))}</script></body></html>";
-    request->send(200, "text/html", html);
-});
+  // Editor page - DISABLED (was causing crashes)
+  // Use /upload page for file uploads instead
+  // Editor functionality can be added back later with better memory management
+  server.on("/editor", HTTP_GET, [](AsyncWebServerRequest *request){
+      String html = "<!DOCTYPE html><html><head><title>Editor Disabled</title>";
+      html += "<style>body{font-family:Arial;margin:50px;background:#1a1a1a;color:#fff;text-align:center}";
+      html += "h1{color:#ff6600}a{color:#00bfff;text-decoration:none}</style></head><body>";
+      html += "<h1>JSON Editor Temporarily Disabled</h1>";
+      html += "<p>The live editor was causing memory issues and crashes.</p>";
+      html += "<p>Please use the <a href='/upload'>Upload Page</a> to upload JSON files instead.</p>";
+      html += "<p><a href='/'>Back to Dashboard</a></p>";
+      html += "</body></html>";
+      request->send(200, "text/html", html);
+  });
   
   // ========== END WEB JSON UPLOAD & EDITOR ==========
 
