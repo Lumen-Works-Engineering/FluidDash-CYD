@@ -16,8 +16,12 @@ https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src
 https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/network/network.cpp
 https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/utils/utils.h
 https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/utils/utils.cpp
+https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/webserver/webserver_manager.h
+https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/webserver/webserver_manager.cpp
 https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/screens/monitor.json
 https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/TOMORROW_SESSION_NOTES.md
 https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/DS18B20_PHASE1_IMPLEMENTATION.md
 https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/DYNAMIC_DATA_VARIABLES_AND_API_REFERENCE.md
+https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/WEBSERVER_REFACTOR_IMPLEMENTATION_SUMMARY.md
+https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/FLUIDDASH_WEBSERVER_REFACTOR_UPDATED.md
 ```

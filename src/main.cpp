@@ -49,19 +49,19 @@ public:
 #endif
 
 #include <Preferences.h>
-#include <ESPAsyncWebServer.h>
-#include <ESPmDNS.h>
 #include <ESPmDNS.h>
 #include <SD.h>
 #include <SPI.h>
 #include <ArduinoJson.h>
+// #include <ESP32FtpServer.h>  // Temporarily disabled - SD_MMC library conflict
+#include "webserver/webserver_manager.h"
 
 // Display instance is now in display.cpp (extern declaration in display.h)
 RTC_DS3231 rtc;
 WebSocketsClient webSocket;
 Preferences prefs;  // Needed for WiFi credentials storage
-AsyncWebServer server(80);
 WiFiManager wm;
+// FtpServer ftpServer;  // Temporarily disabled
 
 // Runtime variables
 DisplayMode currentMode;
@@ -126,9 +126,9 @@ unsigned long lastStatusRequest = 0;
 unsigned long sessionStartTime = 0;
 unsigned long buttonPressStart = 0;
 bool buttonPressed = false;
+// unsigned long lastFTPCheck = 0;  // FTP temporarily disabled
 
 // ========== Function Prototypes ==========
-void setupWebServer();
 String getMainHTML();
 String getSettingsHTML();
 String getAdminHTML();
@@ -799,7 +799,11 @@ void setup() {
 
   // Start web server (always available in STA, AP, or standalone mode)
   Serial.println("Starting web server...");
-  setupWebServer();
+  webServer.begin();
+  feedLoopWDT();
+
+  // FTP server temporarily disabled due to library conflict
+  // Will be added back with a different FTP library in future update
   feedLoopWDT();
 
   sessionStartTime = millis();
@@ -821,6 +825,11 @@ void setup() {
 void loop() {
   // Feed the watchdog timer at the start of each loop iteration
   feedLoopWDT();
+
+  // Handle WebServer (synchronous, safe)
+  webServer.handleClient();
+
+  // FTP server temporarily disabled
 
   handleButton();
 
@@ -921,268 +930,7 @@ void loop() {
 // WiFi manager setup is now in network/network.cpp
 
 // ========== Web Server Setup ==========
-
-void setupWebServer() {
-  // Serve main configuration page
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getMainHTML());
-  });
-  
-  // User settings page
-  server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getSettingsHTML());
-  });
-  
-  // Admin/calibration page
-  server.on("/admin", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getAdminHTML());
-  });
-
-  // WiFi configuration page
-  server.on("/wifi", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getWiFiConfigHTML());
-  });
-
-  // API: Get current config as JSON
-  server.on("/api/config", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "application/json", getConfigJSON());
-  });
-  
-  // API: Get current status as JSON
-  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "application/json", getStatusJSON());
-  });
-  
-  // API: Save settings
-  server.on("/api/save", HTTP_POST, [](AsyncWebServerRequest *request){
-    // Update config from POST parameters
-    if (request->hasParam("temp_low", true)) {
-      cfg.temp_threshold_low = request->getParam("temp_low", true)->value().toFloat();
-    }
-    if (request->hasParam("temp_high", true)) {
-      cfg.temp_threshold_high = request->getParam("temp_high", true)->value().toFloat();
-    }
-    if (request->hasParam("fan_min", true)) {
-      cfg.fan_min_speed = request->getParam("fan_min", true)->value().toInt();
-    }
-    if (request->hasParam("graph_time", true)) {
-      uint16_t newTime = request->getParam("graph_time", true)->value().toInt();
-      if (newTime != cfg.graph_timespan_seconds) {
-        cfg.graph_timespan_seconds = newTime;
-        allocateHistoryBuffer(); // Reallocate with new size
-      }
-    }
-    if (request->hasParam("graph_interval", true)) {
-      cfg.graph_update_interval = request->getParam("graph_interval", true)->value().toInt();
-    }
-    if (request->hasParam("psu_low", true)) {
-      cfg.psu_alert_low = request->getParam("psu_low", true)->value().toFloat();
-    }
-    if (request->hasParam("psu_high", true)) {
-      cfg.psu_alert_high = request->getParam("psu_high", true)->value().toFloat();
-    }
-    if (request->hasParam("coord_decimals", true)) {
-      cfg.coord_decimal_places = request->getParam("coord_decimals", true)->value().toInt();
-    }
-    
-    saveConfig();
-    request->send(200, "text/plain", "Settings saved successfully");
-  });
-  
-  // API: Save admin/calibration settings
-  server.on("/api/admin/save", HTTP_POST, [](AsyncWebServerRequest *request){
-    if (request->hasParam("cal_x", true)) {
-      cfg.temp_offset_x = request->getParam("cal_x", true)->value().toFloat();
-    }
-    if (request->hasParam("cal_yl", true)) {
-      cfg.temp_offset_yl = request->getParam("cal_yl", true)->value().toFloat();
-    }
-    if (request->hasParam("cal_yr", true)) {
-      cfg.temp_offset_yr = request->getParam("cal_yr", true)->value().toFloat();
-    }
-    if (request->hasParam("cal_z", true)) {
-      cfg.temp_offset_z = request->getParam("cal_z", true)->value().toFloat();
-    }
-    if (request->hasParam("psu_cal", true)) {
-      cfg.psu_voltage_cal = request->getParam("psu_cal", true)->value().toFloat();
-    }
-    
-    saveConfig();
-    request->send(200, "text/plain", "Calibration saved successfully");
-  });
-  
-  // Reset WiFi settings
-  server.on("/api/reset-wifi", HTTP_POST, [](AsyncWebServerRequest *request){
-    request->send(200, "text/plain", "Resetting WiFi - device will restart");
-    delay(1000);
-    wm.resetSettings();
-    ESP.restart();
-  });
-  
-  // Restart device
-  server.on("/api/restart", HTTP_POST, [](AsyncWebServerRequest *request){
-    request->send(200, "text/plain", "Restarting...");
-    delay(1000);
-    ESP.restart();
-  });
-
-  // WiFi scanning removed - ESP32 cannot scan while in AP mode
-  // Users must manually enter SSID and password
-
-  // API: Connect to WiFi network
-  server.on("/api/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request){
-    String ssid = "";
-    String password = "";
-
-    if (request->hasParam("ssid", true)) {
-      ssid = request->getParam("ssid", true)->value();
-    }
-    if (request->hasParam("password", true)) {
-      password = request->getParam("password", true)->value();
-    }
-
-    if (ssid.length() == 0) {
-      request->send(200, "application/json", "{\"success\":false,\"message\":\"SSID required\"}");
-      return;
-    }
-
-    Serial.println("Attempting to connect to: " + ssid);
-
-    // Store credentials in preferences
-    prefs.begin("fluiddash", false);
-    prefs.putString("wifi_ssid", ssid);
-    prefs.putString("wifi_pass", password);
-    prefs.end();
-
-    // Send response and restart to apply credentials
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Credentials saved. Device will restart and attempt to connect.\"}");
-
-    Serial.println("WiFi credentials saved. Restarting...");
-    delay(2000);
-    ESP.restart();
-  });
-
-  // API: Reload screen layouts from SD card
-  server.on("/api/reload-screens", HTTP_POST, [](AsyncWebServerRequest *request){
-      if (!sdCardAvailable) {
-          request->send(200, "application/json", "{\"success\":false,\"message\":\"SD card not available\"}");
-          return;
-      }
-      
-      Serial.println("[JSON] Reloading screen layouts...");
-      
-      int loaded = 0;
-      if (loadScreenConfig("/screens/monitor.json", monitorLayout)) loaded++;
-      if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) loaded++;
-      if (loadScreenConfig("/screens/graph.json", graphLayout)) loaded++;
-      if (loadScreenConfig("/screens/network.json", networkLayout)) loaded++;
-      
-      // Redraw current screen
-      drawScreen();
-      
-      char response[128];
-      sprintf(response, "{\"success\":true,\"message\":\"Reloaded %d layouts\"}", loaded);
-      request->send(200, "application/json", response);
-      
-      Serial.printf("[JSON] Reloaded %d layouts\n", loaded);
-  });
-    // ========== WEB JSON UPLOAD & EDITOR ==========
-  
-  // Upload page - Disabled, show instructions
-  server.on("/upload", HTTP_GET, [](AsyncWebServerRequest *request){
-      String html = "<!DOCTYPE html><html><head><title>Upload JSON</title>";
-      html += "<style>body{font-family:Arial;margin:20px;background:#1a1a1a;color:#fff}";
-      html += "h1{color:#ff6600}.box{background:#2a2a2a;padding:20px;border-radius:8px;max-width:700px}";
-      html += "code{background:#1a1a1a;padding:2px 5px;border-radius:3px;color:#00bfff}";
-      html += "a{color:#00bfff;text-decoration:none}ul{line-height:1.8}</style></head><body>";
-      html += "<h1>JSON Upload Temporarily Disabled</h1><div class='box'>";
-      html += "<h3>Why is upload disabled?</h3>";
-      html += "<p>The ESP32 SD card library has thread-safety issues with the async web server. ";
-      html += "File operations from web callbacks cause crashes.</p>";
-      html += "<h3>How to update JSON files:</h3>";
-      html += "<ol><li>Remove SD card from device</li>";
-      html += "<li>Insert into computer SD card reader</li>";
-      html += "<li>Edit files in <code>/screens/</code> folder</li>";
-      html += "<li>Re-insert SD card into device</li>";
-      html += "<li>Use <a href='/api/reload-screens'>Reload Screens API</a> or reboot</li></ol>";
-      html += "<h3>Current JSON files:</h3>";
-      html += "<ul><li>monitor.json - Main monitoring screen</li>";
-      html += "<li>alignment.json - Axis alignment view</li>";
-      html += "<li>graph.json - Temperature graphs</li>";
-      html += "<li>network.json - Network information</li></ul>";
-      html += "<p><a href='/'>Back to Dashboard</a></p>";
-      html += "</div></body></html>";
-      request->send(200, "text/html", html);
-  });
-  
-  // Handle file upload - DISABLED
-  // ESP32 SD library has critical thread-safety issues with AsyncWebServer
-  // SD.open() crashes when called from async callbacks running on different cores
-  // TODO: Implement proper solution with FreeRTOS semaphore or move to SPIFFS
-  server.on("/upload-json", HTTP_POST,
-      [](AsyncWebServerRequest *request){
-          request->send(503, "application/json",
-              "{\"success\":false,\"message\":\"Upload disabled - ESP32 SD library not thread-safe with AsyncWebServer. Use SD card reader to update files.\"}");
-      }
-  );
-  
-  // Get JSON file - DISABLED (was causing crashes)
-  server.on("/get-json", HTTP_GET, [](AsyncWebServerRequest *request){
-      request->send(503, "application/json", "{\"success\":false,\"message\":\"Endpoint disabled - causing crashes\"}");
-  });
-  
-  // Save JSON file - DISABLED (use /upload instead)
-  // This endpoint was causing memory issues and crashes
-  // Use the /upload page for file uploads instead
-  /*
-  server.on("/save-json", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-          static String jsonData;
-          if(index == 0) jsonData = "";
-          for(size_t i = 0; i < len; i++) jsonData += (char)data[i];
-          if(index + len == total){
-              JsonDocument doc;
-              if(deserializeJson(doc, jsonData)){
-                  request->send(400, "application/json", "{\"success\":false}");
-                  return;
-              }
-              String filename = doc["filename"];
-              String content = doc["content"];
-              String path = "/screens/" + filename;
-              File file = SD.open(path, FILE_WRITE);
-              if(!file){
-                  request->send(500, "application/json", "{\"success\":false}");
-                  return;
-              }
-              file.print(content);
-              file.close();
-              Serial.printf("[Editor] Saved: %s\n", path.c_str());
-              request->send(200, "application/json", "{\"success\":true}");
-          }
-      }
-  );
-  */
-  
-  // Editor page - DISABLED (was causing crashes)
-  // Use /upload page for file uploads instead
-  // Editor functionality can be added back later with better memory management
-  server.on("/editor", HTTP_GET, [](AsyncWebServerRequest *request){
-      String html = "<!DOCTYPE html><html><head><title>Editor Disabled</title>";
-      html += "<style>body{font-family:Arial;margin:50px;background:#1a1a1a;color:#fff;text-align:center}";
-      html += "h1{color:#ff6600}a{color:#00bfff;text-decoration:none}</style></head><body>";
-      html += "<h1>JSON Editor Temporarily Disabled</h1>";
-      html += "<p>The live editor was causing memory issues and crashes.</p>";
-      html += "<p>Please use the <a href='/upload'>Upload Page</a> to upload JSON files instead.</p>";
-      html += "<p><a href='/'>Back to Dashboard</a></p>";
-      html += "</body></html>";
-      request->send(200, "text/html", html);
-  });
-  
-  // ========== END WEB JSON UPLOAD & EDITOR ==========
-
-  server.begin();
-  Serial.println("Web server started");
-}
+// Web server implementation is now in webserver/webserver.cpp
 
 // ========== HTML Pages ==========
 // NOTE: These functions return large String objects which can cause heap fragmentation.
