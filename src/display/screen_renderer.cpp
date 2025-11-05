@@ -76,16 +76,26 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
 
     Serial.printf("[JSON] Loading screen config: %s\n", filename);
 
-    // Acquire SD card mutex
-    if (!SD_MUTEX_LOCK()) {
-        Serial.println("[JSON] Failed to lock SD mutex for screen config");
+    // EXPLICIT NULL check for mutex
+    if (g_sdCardMutex == NULL) {
+        Serial.println("[JSON/loadScreenConfig] CRASH PREVENTED: Mutex is NULL!");
         return false;
     }
+
+    // EXPLICIT lock with timeout
+    Serial.printf("[JSON/loadScreenConfig] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+    BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+    if (lockResult != pdTRUE) {
+        Serial.println("[JSON/loadScreenConfig] Failed to acquire lock (timeout)");
+        return false;
+    }
+    Serial.println("[JSON/loadScreenConfig] ✓ Lock acquired");
 
     // Open file
     File file = SD.open(filename, FILE_READ);
     if (!file) {
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[JSON/loadScreenConfig] ✓ Unlocked (result=%d)\n", unlockResult);
         Serial.printf("[JSON] Failed to open %s\n", filename);
         return false;
     }
@@ -95,7 +105,8 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     if (fileSize > 8192) {
         Serial.printf("[JSON] File too large: %d bytes (max 8192)\n", fileSize);
         file.close();
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[JSON/loadScreenConfig] ✓ Unlocked (result=%d)\n", unlockResult);
         return false;
     }
 
@@ -104,7 +115,8 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     if (!jsonBuffer) {
         Serial.println("[JSON] Failed to allocate memory");
         file.close();
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[JSON/loadScreenConfig] ✓ Unlocked (result=%d)\n", unlockResult);
         return false;
     }
 
@@ -113,8 +125,9 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     jsonBuffer[bytesRead] = '\0';
     file.close();
 
-    // Release SD card mutex - file is closed, data is in memory
-    SD_MUTEX_UNLOCK();
+    // EXPLICIT unlock - file is closed, data is in memory
+    BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+    Serial.printf("[JSON/loadScreenConfig] ✓ Unlocked (result=%d)\n", unlockResult);
 
     // Parse JSON
     JsonDocument doc;

@@ -591,92 +591,179 @@ const char WIFI_CONFIG_HTML[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 // ============ WEB SERVER FUNCTIONS ============
-
 void setup() {
   Serial.begin(115200);
-  Serial.println("FluidDash - Starting...");
+  delay(500);  // Give serial time to stabilize
+  Serial.println("\n\n=== FluidDash - Starting... ===");
+  
+  // ========== PHASE 0: MUTEX & HARDWARE INIT (BEFORE ANYTHING ELSE) ==========
+  Serial.println("[SETUP] Phase 0: Initializing mutex and core hardware...");
+  feedLoopWDT();
+  initSDMutex();
 
+  // SANITY CHECK - Halt if mutex initialization failed
+  delay(100);  // Give it time to settle
+  if (g_sdCardMutex == NULL) {
+    Serial.println("CRITICAL: Mutex is still NULL after initSDMutex()!");
+    Serial.println("System will crash. Halting.");
+    while(1) {
+      delay(1000);
+      Serial.println("HALTED - Mutex initialization failed");
+    }
+  }
+
+  Serial.printf("MUTEX VERIFIED: 0x%p is valid\n", g_sdCardMutex);
+  Serial.println("[SETUP] ✓ SD mutex initialized and verified");
+
+  feedLoopWDT();
+  
   // Initialize default configuration
   initDefaultConfig();
 
   // Enable watchdog timer (10 seconds)
   enableLoopWDT();
-  Serial.println("Watchdog timer enabled (10s timeout)");
+  Serial.println("[SETUP] ✓ Watchdog timer enabled (10s timeout)");
 
-  // Initialize display (feed watchdog before long operation)
+  // ========== PHASE 1: DISPLAY & HARDWARE ==========
+  // Initialize display
   feedLoopWDT();
-  Serial.println("Initializing display...");
+  Serial.println("[SETUP] Phase 1: Initializing display...");
   gfx.init();
   gfx.setRotation(1);  // 90° rotation for landscape mode (480x320)
   gfx.setBrightness(255);
-  Serial.println("Display initialized OK");
+  Serial.println("[SETUP] ✓ Display initialized");
   gfx.fillScreen(COLOR_BG);
   showSplashScreen();
   delay(2000);  // Show splash briefly
 
-  // Initialize hardware BEFORE drawing (RTC needed for datetime display)
+  // Initialize hardware (RTC needed for datetime display)
   feedLoopWDT();
   Wire.begin(RTC_SDA, RTC_SCL);  // CYD I2C pins: GPIO32=SDA, GPIO25=SCL
 
-  // Check if RTC is present (may not be connected on CYD)
+  // Check if RTC is present
   if (!rtc.begin()) {
-    Serial.println("RTC not found - time display will show 'No RTC'");
+    Serial.println("[SETUP] ⚠ RTC not found - time display will show 'No RTC'");
     rtcAvailable = false;
   } else {
-    Serial.println("RTC initialized");
+    Serial.println("[SETUP] ✓ RTC initialized");
     rtcAvailable = true;
   }
 
+  // Configure GPIO
   pinMode(BTN_MODE, INPUT_PULLUP);
 
-  // RGB LED setup (common anode - LOW=on)
-  pinMode(LED_RED, OUTPUT);
-  pinMode(LED_GREEN, OUTPUT);
-  pinMode(LED_BLUE, OUTPUT);
-  digitalWrite(LED_RED, HIGH);    // OFF
-  digitalWrite(LED_GREEN, HIGH);  // OFF
-  digitalWrite(LED_BLUE, HIGH);   // OFF
-
   // Configure ADC & PWM
+  feedLoopWDT();
   analogSetWidth(12);
   analogSetAttenuation(ADC_11db);
-  ledcSetup(0, PWM_FREQ, PWM_RESOLUTION);  // channel 0
-  ledcAttachPin(FAN_PWM, 0);               // attach pin to channel 0
+  ledcSetup(0, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(FAN_PWM, 0);
   ledcWrite(0, 0);
   pinMode(FAN_TACH, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(FAN_TACH), tachISR, FALLING);
+  Serial.println("[SETUP] ✓ ADC & PWM configured");
 
-  // Load configuration (overwrites defaults with saved values)
+  // Load configuration
+  feedLoopWDT();
   loadConfig();
-
-  // Allocate history buffer based on config
   allocateHistoryBuffer();
 
   // Initialize DS18B20 temperature sensors
   feedLoopWDT();
   initDS18B20Sensors();
+  Serial.println("[SETUP] ✓ Temperature sensors initialized");
 
-  // Try to connect to saved WiFi credentials
-  Serial.println("Attempting WiFi connection...");
+  // ========== PHASE 2: SD CARD (SINGLE INITIALIZATION) ==========
+  Serial.println("[SETUP] Phase 2: Initializing SD card...");
+  feedLoopWDT();
+  
+  SPIClass spiSD(VSPI);
+  spiSD.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
 
-  // Read WiFi credentials from preferences
+  if (SD.begin(SD_CS, spiSD)) {
+    sdCardAvailable = true;
+    Serial.println("[SETUP] ✓ SD card initialized");
+    
+    // Get card info
+    uint8_t cardType = SD.cardType();
+    Serial.print("     Card Type: ");
+    if (cardType == CARD_MMC) {
+      Serial.println("MMC");
+    } else if (cardType == CARD_SD) {
+      Serial.println("SDSC");
+    } else if (cardType == CARD_SDHC) {
+      Serial.println("SDHC");
+    } else {
+      Serial.println("Unknown");
+    }
+    
+    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.printf("     Card Size: %lluMB\n", cardSize);
+    
+    // Create screens directory
+    if (!SD.exists("/screens")) {
+      if (SD.mkdir("/screens")) {
+        Serial.println("     Created directory: /screens");
+      } else {
+        Serial.println("     ⚠ Failed to create /screens directory");
+      }
+    } else {
+      Serial.println("     Directory exists: /screens");
+    }
+    
+    // Load JSON layouts (ONLY if SD is available)
+    feedLoopWDT();
+    Serial.println("[SETUP] Loading JSON screen layouts...");
+    initDefaultLayouts();
+    
+    if (loadScreenConfig("/screens/monitor.json", monitorLayout)) {
+      Serial.println("     ✓ Monitor layout loaded");
+    } else {
+      Serial.println("     ⚠ Monitor layout not found, using fallback");
+    }
+    
+    if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) {
+      Serial.println("     ✓ Alignment layout loaded");
+    }
+    
+    if (loadScreenConfig("/screens/graph.json", graphLayout)) {
+      Serial.println("     ✓ Graph layout loaded");
+    }
+    
+    if (loadScreenConfig("/screens/network.json", networkLayout)) {
+      Serial.println("     ✓ Network layout loaded");
+    }
+    
+    layoutsLoaded = true;
+    Serial.println("[SETUP] ✓ JSON layouts loaded");
+  } else {
+    sdCardAvailable = false;
+    layoutsLoaded = false;
+    initDefaultLayouts();
+    Serial.println("[SETUP] ⚠ SD card not detected - using fallback layouts");
+  }
+
+  // ========== PHASE 3: NETWORK (WIFI & WEB SERVER) ==========
+  feedLoopWDT();
+  Serial.println("[SETUP] Phase 3: Connecting to network...");
+  
+  // Read WiFi credentials
   prefs.begin("fluiddash", true);
   String wifi_ssid = prefs.getString("wifi_ssid", "");
   String wifi_pass = prefs.getString("wifi_pass", "");
   prefs.end();
 
   if (wifi_ssid.length() > 0) {
-    Serial.println("Connecting to: " + wifi_ssid);
+    Serial.printf("     Connecting to: %s\n", wifi_ssid.c_str());
     WiFi.mode(WIFI_STA);
     WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
   } else {
-    Serial.println("No saved WiFi credentials");
+    Serial.println("     No saved WiFi credentials");
     WiFi.mode(WIFI_STA);
   }
 
-  feedLoopWDT();
-
   // Wait up to 10 seconds for connection
+  feedLoopWDT();
   int wifi_retry = 0;
   while (WiFi.status() != WL_CONNECTED && wifi_retry < 20) {
     delay(500);
@@ -687,98 +774,13 @@ void setup() {
   Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
-    // Successfully connected to WiFi
-    Serial.println("WiFi Connected!");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
-    // ========== ADD SD CARD TEST HERE ==========
+    Serial.printf("[SETUP] ✓ WiFi connected: %s\n", WiFi.localIP().toString().c_str());
+    
     feedLoopWDT();
-    Serial.println("\n=== Testing SD Card ===");
-
-    // Initialize SD mutex before any SD operations
-    initSDMutex();
-
-    // Initialize SD card on VSPI bus
-    SPIClass spiSD(VSPI);
-    spiSD.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-
-    if (SD.begin(SD_CS, spiSD)) {
-        sdCardAvailable = true;
-        Serial.println("SUCCESS: SD card initialized!");
-        
-        // Get card info
-        uint8_t cardType = SD.cardType();
-        Serial.print("SD Card Type: ");
-        if (cardType == CARD_MMC) {
-            Serial.println("MMC");
-        } else if (cardType == CARD_SD) {
-            Serial.println("SDSC");
-        } else if (cardType == CARD_SDHC) {
-            Serial.println("SDHC");
-        } else {
-            Serial.println("Unknown");
-        }
-        
-        uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-        Serial.printf("SD Card Size: %lluMB\n", cardSize);
-        
-        // Create screens directory for Phase 2
-        if (!SD.exists("/screens")) {
-            if (SD.mkdir("/screens")) {
-                Serial.println("Created directory: /screens");
-            } else {
-                Serial.println("Failed to create /screens directory");
-            }
-        } else {
-            Serial.println("Directory exists: /screens");
-        }
-        
-    } else {
-        sdCardAvailable = false;
-        Serial.println("WARNING: SD card not detected");
-        Serial.println("Insert SD card and restart for Phase 2 features\n");
-    }
-    // ========== END SD CARD TEST ==========
-    // ========== PHASE 2: LOAD JSON SCREEN LAYOUTS ==========
-    feedLoopWDT();
-    initDefaultLayouts();  // Initialize fallback state
-
-    if (sdCardAvailable) {
-        Serial.println("\n=== Loading JSON Screen Layouts ===");
-        
-        // Try to load monitor layout
-        if (loadScreenConfig("/screens/monitor.json", monitorLayout)) {
-            Serial.println("[JSON] Monitor layout loaded successfully");
-        } else {
-            Serial.println("[JSON] Monitor layout not found or invalid, using fallback");
-        }
-        
-        // Try to load alignment layout (optional for now)
-        if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) {
-            Serial.println("[JSON] Alignment layout loaded successfully");
-        }
-        
-        // Try to load graph layout (optional for now)
-        if (loadScreenConfig("/screens/graph.json", graphLayout)) {
-            Serial.println("[JSON] Graph layout loaded successfully");
-        }
-        
-        // Try to load network layout (optional for now)
-        if (loadScreenConfig("/screens/network.json", networkLayout)) {
-            Serial.println("[JSON] Network layout loaded successfully");
-        }
-        
-        layoutsLoaded = true;
-        Serial.println("=== JSON Layout Loading Complete ===\n");
-    } else {
-        Serial.println("[JSON] SD card not available, using legacy drawing\n");
-    }
-    // ========== END PHASE 2 LAYOUT LOADING ==========
-    feedLoopWDT();
-
+    
     // Set up mDNS
     if (MDNS.begin(cfg.device_name)) {
-      Serial.printf("mDNS started: http://%s.local\n", cfg.device_name);
+      Serial.printf("     mDNS: http://%s.local\n", cfg.device_name);
       MDNS.addService("http", "tcp", 80);
     }
 
@@ -790,26 +792,22 @@ void setup() {
     } else {
       connectFluidNC();
     }
-    feedLoopWDT();
   } else {
-    // WiFi connection failed - continue in standalone mode
-    Serial.println("WiFi connection failed - continuing in standalone mode");
-    Serial.println("Hold button for 10 seconds to enter WiFi configuration mode");
-
-    feedLoopWDT();
+    Serial.println("[SETUP] ⚠ WiFi connection failed - standalone mode");
+    Serial.println("     Hold button for 10 seconds to enter WiFi config mode");
   }
 
   feedLoopWDT();
 
-  // Start web server (always available in STA, AP, or standalone mode)
-  Serial.println("Starting web server...");
+  // ========== PHASE 4: START WEB SERVER (LAST - AFTER MUTEX IS STABLE) ==========
+  Serial.println("[SETUP] Phase 4: Starting web server...");
+  feedLoopWDT();
   webServer.begin();
+  Serial.println("[SETUP] ✓ Web server started");
+  
   feedLoopWDT();
 
-  // FTP server temporarily disabled due to library conflict
-  // Will be added back with a different FTP library in future update
-  feedLoopWDT();
-
+  // Session and mode setup
   sessionStartTime = millis();
   currentMode = cfg.default_mode;
 
@@ -817,12 +815,12 @@ void setup() {
   delay(2000);
   feedLoopWDT();
 
-  // Clear splash screen and draw the main interface
-  Serial.println("Drawing main interface...");
+  // Draw main interface
+  Serial.println("[SETUP] Drawing main interface...");
   drawScreen();
   feedLoopWDT();
 
-  Serial.println("Setup complete - entering main loop");
+  Serial.println("\n[SETUP] ✓✓✓ Setup complete - entering main loop ✓✓✓\n");
   feedLoopWDT();
 }
 

@@ -41,21 +41,44 @@ void WebServerManager::stop() {
 void WebServerManager::listDirRecursive(File dir, String prefix, JsonArray& files, int depth) {
     if (depth > 3) return;  // Limit recursion depth
 
+    // Verify dir is valid before using it
+    if (!dir) {
+        Serial.println("[listDirRecursive] Invalid directory handle");
+        return;
+    }
+
     while (true) {
         File entry = dir.openNextFile();
         if (!entry) {
-            break;
+            break;  // No more files
         }
 
-        String fullPath = prefix + "/" + String(entry.name());
+        // CRITICAL: Check if entry is valid before accessing ANY methods
+        // The ESP32 SD library can return invalid File objects
+        const char* entryName = entry.name();
+        if (!entryName) {
+            Serial.println("[listDirRecursive] Warning: entry.name() returned NULL, skipping");
+            entry.close();
+            continue;
+        }
 
-        if (entry.isDirectory()) {
+        String fullPath = prefix + "/" + String(entryName);
+
+        // Check if it's a directory BEFORE accessing other methods
+        bool isDir = entry.isDirectory();
+
+        if (isDir) {
+            // Recursively process subdirectory
             listDirRecursive(entry, fullPath, files, depth + 1);
         } else {
+            // Get size before adding to JSON (in case size() also fails)
+            size_t fileSize = entry.size();
+
             JsonObject fileObj = files.createNestedObject();
             fileObj["name"] = fullPath;
-            fileObj["size"] = entry.size();
+            fileObj["size"] = fileSize;
         }
+
         entry.close();
     }
 }
@@ -64,15 +87,25 @@ void WebServerManager::listDirRecursive(File dir, String prefix, JsonArray& file
 void WebServerManager::setupScreenRoutes() {
     // GET /api/screens - List all screen JSON files
     server->on("/api/screens", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!SD_MUTEX_LOCK()) {
-            Serial.println("[API] Failed to lock SD mutex for /api/screens");
-            request->send(500, "application/json", "{\"error\":\"SD card busy or mutex error\"}");
+        if (g_sdCardMutex == NULL) {
+            Serial.println("[API/screens] CRASH PREVENTED: Mutex is NULL!");
+            request->send(500, "text/plain", "SD mutex not initialized");
             return;
         }
 
+        Serial.printf("[API/screens] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+        BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+        if (lockResult != pdTRUE) {
+            Serial.println("[API/screens] Failed to acquire lock (timeout)");
+            request->send(503, "text/plain", "SD card busy");
+            return;
+        }
+        Serial.println("[API/screens] ✓ Lock acquired");
+
         File screensDir = SD.open("/screens");
         if (!screensDir || !screensDir.isDirectory()) {
-            SD_MUTEX_UNLOCK();
+            BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+            Serial.printf("[API/screens] ✓ Unlocked (result=%d)\n", unlockResult);
             request->send(500, "application/json", "{\"error\":\"Failed to open screens directory\"}");
             return;
         }
@@ -83,21 +116,33 @@ void WebServerManager::setupScreenRoutes() {
         while (true) {
             File entry = screensDir.openNextFile();
             if (!entry) {
-                break;
+                break;  // No more files
             }
 
-            if (!entry.isDirectory()) {
-                String filename = String(entry.name());
+            // CRITICAL: Validate entry before accessing methods
+            const char* entryName = entry.name();
+            if (!entryName) {
+                Serial.println("[API/screens] Warning: entry.name() returned NULL, skipping");
+                entry.close();
+                continue;
+            }
+
+            bool isDir = entry.isDirectory();
+            if (!isDir) {
+                String filename = String(entryName);
                 if (filename.endsWith(".json")) {
+                    size_t fileSize = entry.size();
+
                     JsonObject screenObj = screens.createNestedObject();
                     screenObj["name"] = filename;
-                    screenObj["size"] = entry.size();
+                    screenObj["size"] = fileSize;
                 }
             }
             entry.close();
         }
         screensDir.close();
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[API/screens] ✓ Unlocked (result=%d)\n", unlockResult);
 
         String response;
         serializeJson(doc, response);
@@ -116,11 +161,20 @@ void WebServerManager::setupScreenRoutes() {
             if (index == 0) {
                 Serial.printf("Upload start: %s\n", filename.c_str());
 
-                if (!SD_MUTEX_LOCK()) {
-                    Serial.println("[API] Failed to lock SD mutex for /api/upload-screen");
+                if (g_sdCardMutex == NULL) {
+                    Serial.println("[API/upload-screen] CRASH PREVENTED: Mutex is NULL!");
                     mutexLocked = false;
                     return;
                 }
+
+                Serial.printf("[API/upload-screen] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+                BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+                if (lockResult != pdTRUE) {
+                    Serial.println("[API/upload-screen] Failed to acquire lock (timeout)");
+                    mutexLocked = false;
+                    return;
+                }
+                Serial.println("[API/upload-screen] ✓ Lock acquired");
                 mutexLocked = true;
 
                 if (!SD.exists("/screens")) {
@@ -131,7 +185,8 @@ void WebServerManager::setupScreenRoutes() {
                 uploadFile = SD.open(filepath, FILE_WRITE);
 
                 if (!uploadFile) {
-                    SD_MUTEX_UNLOCK();
+                    BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+                    Serial.printf("[API/upload-screen] ✓ Unlocked (result=%d)\n", unlockResult);
                     mutexLocked = false;
                     Serial.println("Failed to open file for writing");
                     return;
@@ -147,7 +202,8 @@ void WebServerManager::setupScreenRoutes() {
                     uploadFile.close();
                 }
                 if (mutexLocked) {
-                    SD_MUTEX_UNLOCK();
+                    BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+                    Serial.printf("[API/upload-screen] ✓ Unlocked (result=%d)\n", unlockResult);
                     mutexLocked = false;
                 }
                 Serial.printf("Upload complete: %s, total size: %d\n", filename.c_str(), index + len);
@@ -165,20 +221,31 @@ void WebServerManager::setupScreenRoutes() {
         String filename = request->getParam("filename")->value();
         String filepath = "/screens/" + filename;
 
-        if (!SD_MUTEX_LOCK()) {
-            Serial.println("[API] Failed to lock SD mutex for /api/delete-screen");
-            request->send(500, "application/json", "{\"error\":\"SD card busy or mutex error\"}");
+        if (g_sdCardMutex == NULL) {
+            Serial.println("[API/delete-screen] CRASH PREVENTED: Mutex is NULL!");
+            request->send(500, "text/plain", "SD mutex not initialized");
             return;
         }
 
+        Serial.printf("[API/delete-screen] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+        BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+        if (lockResult != pdTRUE) {
+            Serial.println("[API/delete-screen] Failed to acquire lock (timeout)");
+            request->send(503, "text/plain", "SD card busy");
+            return;
+        }
+        Serial.println("[API/delete-screen] ✓ Lock acquired");
+
         if (!SD.exists(filepath)) {
-            SD_MUTEX_UNLOCK();
+            BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+            Serial.printf("[API/delete-screen] ✓ Unlocked (result=%d)\n", unlockResult);
             request->send(404, "application/json", "{\"error\":\"File not found\"}");
             return;
         }
 
         bool success = SD.remove(filepath);
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[API/delete-screen] ✓ Unlocked (result=%d)\n", unlockResult);
 
         if (success) {
             request->send(200, "application/json", "{\"success\":true}");
@@ -242,15 +309,25 @@ void WebServerManager::setupSchemaRoutes() {
 void WebServerManager::setupFileRoutes() {
     // GET /api/files - List all files on SD card
     server->on("/api/files", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        if (!SD_MUTEX_LOCK()) {
-            Serial.println("[API] Failed to lock SD mutex for /api/files");
-            request->send(500, "application/json", "{\"error\":\"SD card busy or mutex error\"}");
+        if (g_sdCardMutex == NULL) {
+            Serial.println("[API/files] CRASH PREVENTED: Mutex is NULL!");
+            request->send(500, "text/plain", "SD mutex not initialized");
             return;
         }
 
+        Serial.printf("[API/files] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+        BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+        if (lockResult != pdTRUE) {
+            Serial.println("[API/files] Failed to acquire lock (timeout)");
+            request->send(503, "text/plain", "SD card busy");
+            return;
+        }
+        Serial.println("[API/files] ✓ Lock acquired");
+
         File root = SD.open("/");
         if (!root || !root.isDirectory()) {
-            SD_MUTEX_UNLOCK();
+            BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+            Serial.printf("[API/files] ✓ Unlocked (result=%d)\n", unlockResult);
             request->send(500, "application/json", "{\"error\":\"Failed to open root directory\"}");
             return;
         }
@@ -261,7 +338,8 @@ void WebServerManager::setupFileRoutes() {
         listDirRecursive(root, "", files, 0);
 
         root.close();
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[API/files] ✓ Unlocked (result=%d)\n", unlockResult);
 
         String response;
         serializeJson(doc, response);
@@ -277,21 +355,32 @@ void WebServerManager::setupFileRoutes() {
 
         String filepath = request->getParam("path")->value();
 
-        if (!SD_MUTEX_LOCK()) {
-            Serial.println("[API] Failed to lock SD mutex for /api/download");
-            request->send(500, "application/json", "{\"error\":\"SD card busy or mutex error\"}");
+        if (g_sdCardMutex == NULL) {
+            Serial.println("[API/download] CRASH PREVENTED: Mutex is NULL!");
+            request->send(500, "text/plain", "SD mutex not initialized");
             return;
         }
 
+        Serial.printf("[API/download] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+        BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+        if (lockResult != pdTRUE) {
+            Serial.println("[API/download] Failed to acquire lock (timeout)");
+            request->send(503, "text/plain", "SD card busy");
+            return;
+        }
+        Serial.println("[API/download] ✓ Lock acquired");
+
         if (!SD.exists(filepath)) {
-            SD_MUTEX_UNLOCK();
+            BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+            Serial.printf("[API/download] ✓ Unlocked (result=%d)\n", unlockResult);
             request->send(404, "application/json", "{\"error\":\"File not found\"}");
             return;
         }
 
         File file = SD.open(filepath, FILE_READ);
         if (!file) {
-            SD_MUTEX_UNLOCK();
+            BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+            Serial.printf("[API/download] ✓ Unlocked (result=%d)\n", unlockResult);
             request->send(500, "application/json", "{\"error\":\"Failed to open file\"}");
             return;
         }
@@ -300,14 +389,16 @@ void WebServerManager::setupFileRoutes() {
         size_t fileSize = file.size();
         if (fileSize > 102400) {  // 100KB limit
             file.close();
-            SD_MUTEX_UNLOCK();
+            BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+            Serial.printf("[API/download] ✓ Unlocked (result=%d)\n", unlockResult);
             request->send(413, "application/json", "{\"error\":\"File too large\"}");
             return;
         }
 
         String content = file.readString();
         file.close();
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[API/download] ✓ Unlocked (result=%d)\n", unlockResult);
 
         // Now safe to send - file is closed, mutex is unlocked
         request->send(200, "application/octet-stream", content);
@@ -322,20 +413,31 @@ void WebServerManager::setupFileRoutes() {
 
         String filepath = request->getParam("path")->value();
 
-        if (!SD_MUTEX_LOCK()) {
-            Serial.println("[API] Failed to lock SD mutex for /api/delete-file");
-            request->send(500, "application/json", "{\"error\":\"SD card busy or mutex error\"}");
+        if (g_sdCardMutex == NULL) {
+            Serial.println("[API/delete-file] CRASH PREVENTED: Mutex is NULL!");
+            request->send(500, "text/plain", "SD mutex not initialized");
             return;
         }
 
+        Serial.printf("[API/delete-file] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+        BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+        if (lockResult != pdTRUE) {
+            Serial.println("[API/delete-file] Failed to acquire lock (timeout)");
+            request->send(503, "text/plain", "SD card busy");
+            return;
+        }
+        Serial.println("[API/delete-file] ✓ Lock acquired");
+
         if (!SD.exists(filepath)) {
-            SD_MUTEX_UNLOCK();
+            BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+            Serial.printf("[API/delete-file] ✓ Unlocked (result=%d)\n", unlockResult);
             request->send(404, "application/json", "{\"error\":\"File not found\"}");
             return;
         }
 
         bool success = SD.remove(filepath);
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[API/delete-file] ✓ Unlocked (result=%d)\n", unlockResult);
 
         if (success) {
             request->send(200, "application/json", "{\"success\":true}");
@@ -346,17 +448,27 @@ void WebServerManager::setupFileRoutes() {
 
     // GET /api/disk-usage - Get SD card disk usage
     server->on("/api/disk-usage", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!SD_MUTEX_LOCK()) {
-            Serial.println("[API] Failed to lock SD mutex for /api/disk-usage");
-            request->send(500, "application/json", "{\"error\":\"SD card busy or mutex error\"}");
+        if (g_sdCardMutex == NULL) {
+            Serial.println("[API/disk-usage] CRASH PREVENTED: Mutex is NULL!");
+            request->send(500, "text/plain", "SD mutex not initialized");
             return;
         }
+
+        Serial.printf("[API/disk-usage] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+        BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+        if (lockResult != pdTRUE) {
+            Serial.println("[API/disk-usage] Failed to acquire lock (timeout)");
+            request->send(503, "text/plain", "SD card busy");
+            return;
+        }
+        Serial.println("[API/disk-usage] ✓ Lock acquired");
 
         uint64_t cardSize = SD.cardSize() / (1024 * 1024);
         uint64_t totalBytes = SD.totalBytes() / (1024 * 1024);
         uint64_t usedBytes = SD.usedBytes() / (1024 * 1024);
 
-        SD_MUTEX_UNLOCK();
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[API/disk-usage] ✓ Unlocked (result=%d)\n", unlockResult);
 
         JsonDocument doc;
         doc["cardSizeMB"] = cardSize;
@@ -434,11 +546,38 @@ void WebServerManager::setupLegacyRoutes() {
 
     // GET /api/status - Get system status
     server->on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        // EXPLICIT verification
+        if (g_sdCardMutex == NULL) {
+            Serial.println("[API/status] CRASH PREVENTED: Mutex is NULL!");
+            request->send(500, "text/plain", "SD mutex not initialized");
+            return;
+        }
+
+        Serial.printf("[API/status] Attempting to lock mutex at 0x%p\n", g_sdCardMutex);
+
+        // EXPLICIT lock with return value check
+        BaseType_t lockResult = xSemaphoreTake(g_sdCardMutex, pdMS_TO_TICKS(5000));
+
+        if (lockResult != pdTRUE) {
+            Serial.println("[API/status] Failed to acquire lock (timeout)");
+            request->send(503, "text/plain", "SD card busy");
+            return;
+        }
+
+        Serial.println("[API/status] ✓ Lock acquired");
+
+        // Build response with SD operations
         JsonDocument doc;
         doc["uptime"] = millis() / 1000;
         doc["freeHeap"] = ESP.getFreeHeap();
         doc["chipModel"] = ESP.getChipModel();
-        doc["sdCardPresent"] = SD.cardSize() > 0;
+
+        bool sdPresent = (SD.cardSize() > 0);
+        doc["sdCardPresent"] = sdPresent;
+
+        // EXPLICIT unlock
+        BaseType_t unlockResult = xSemaphoreGive(g_sdCardMutex);
+        Serial.printf("[API/status] ✓ Unlocked (result=%d)\n", unlockResult);
 
         String response;
         serializeJson(doc, response);
