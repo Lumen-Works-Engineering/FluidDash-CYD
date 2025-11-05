@@ -22,31 +22,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <WiFiManager.h>
-#if __has_include(<WebSocketsClient.h>)
 #include <WebSocketsClient.h>
-#else
-enum WStype_t {
-  WStype_DISCONNECTED,
-  WStype_CONNECTED,
-  WStype_TEXT,
-  WStype_ERROR
-};
-
-class WebSocketsClient {
-public:
-  WebSocketsClient() {}
-  // Begin with host (c-string), port and path
-  void begin(const char* host, uint16_t port, const char* path) {}
-  // Register event callback: void callback(WStype_t type, uint8_t* payload, size_t length)
-  void onEvent(void (*cb)(WStype_t, uint8_t*, size_t)) {}
-  void setReconnectInterval(unsigned long) {}
-  // Send text - return true on pretend success
-  bool sendTXT(const String& /*txt*/) { return true; }
-  // Called in loop to perform processing (no-op in stub)
-  void loop() {}
-};
-
-#endif
 
 #include <Preferences.h>
 #include <WebServer.h>
@@ -63,9 +39,6 @@ StorageManager storage;
 // Upload queue - handlers queue uploads, loop() executes them
 // SDUploadQueue uploadQueue;  // DISABLED: Phase 1 - will re-enable in Phase 2 with SPIFFS
 
-// Layout reload queue - web handler queues, loop processes
-volatile bool needsLayoutReload = false;
-volatile bool isReloadingLayouts = false;
 
 // Display instance is now in display.cpp (extern declaration in display.h)
 RTC_DS3231 rtc;
@@ -827,69 +800,9 @@ void setup() {
   feedLoopWDT();
 }
 
-// Process queued layout reload - called from loop() only
-void processQueuedLayoutReload() {
-    // Skip if not needed or already processing
-    if (!needsLayoutReload || isReloadingLayouts) {
-        return;
-    }
-
-    // Mark as processing
-    isReloadingLayouts = true;
-
-    Serial.println("[Layouts] Processing queued reload...");
-
-    // CRITICAL: Yield and delay to let WebServer settle
-    yield();
-    delay(50);  // Let any pending WebServer operations complete
-    yield();
-
-    int loaded = 0;
-
-    // Load each layout with yield() between operations
-    if (loadScreenConfig("/screens/monitor.json", monitorLayout)) {
-        loaded++;
-        Serial.println("[Layouts] ✓ Monitor layout loaded");
-    }
-    yield();
-
-    if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) {
-        loaded++;
-        Serial.println("[Layouts] ✓ Alignment layout loaded");
-    }
-    yield();
-
-    if (loadScreenConfig("/screens/graph.json", graphLayout)) {
-        loaded++;
-        Serial.println("[Layouts] ✓ Graph layout loaded");
-    }
-    yield();
-
-    if (loadScreenConfig("/screens/network.json", networkLayout)) {
-        loaded++;
-        Serial.println("[Layouts] ✓ Network layout loaded");
-    }
-    yield();
-
-    // Redraw screen with new layouts
-    drawScreen();
-    yield();
-
-    Serial.printf("[Layouts] ✓ Reload complete: %d layouts loaded\n", loaded);
-
-    // Clear flags
-    needsLayoutReload = false;
-    isReloadingLayouts = false;
-}
-
 void loop() {
   // Handle web server requests
   server.handleClient();
-
-  // Process queued layout reload (safe - only in loop context)
-  if (needsLayoutReload && !isReloadingLayouts) {
-    processQueuedLayoutReload();
-  }
 
   // Process one queued upload per loop iteration (safe SD access)
   // This prevents blocking and spreads processing over time
@@ -1097,27 +1010,14 @@ void handleAPIWiFiConnect() {
 }
 
 void handleAPIReloadScreens() {
-    // Check if already reloading to prevent queue overflow
-    if (isReloadingLayouts) {
-        server.send(503, "application/json",
-            "{\"error\":\"Layout reload already in progress\"}");
-        return;
-    }
+    // PHASE 2 FINAL: Reboot-based workflow (avoids mutex/context issues)
+    Serial.println("[API] Layout reload requested - rebooting device");
 
-    // Check if one is already queued
-    if (needsLayoutReload) {
-        server.send(200, "application/json",
-            "{\"status\":\"Layout reload already queued\"}");
-        return;
-    }
-
-    // Queue the reload - don't execute here
-    Serial.println("[API] Layout reload queued from web request");
-    needsLayoutReload = true;
-
-    // Return immediately - don't block
     server.send(200, "application/json",
-        "{\"status\":\"Layout reload queued\",\"message\":\"Layouts will reload on next cycle\"}");
+        "{\"status\":\"Rebooting device to load new layouts...\",\"message\":\"Device will restart in 1 second\"}");
+
+    delay(1000);  // Let response send
+    ESP.restart();
 }
 
 // ========== PHASE 2: SPIFFS-BASED UPLOAD SYSTEM ==========
@@ -1126,23 +1026,32 @@ void handleUpload() {
   String html = "<!DOCTYPE html><html><head><title>Upload JSON</title>";
   html += "<style>body{font-family:Arial;margin:20px;background:#1a1a1a;color:#fff}";
   html += "h1{color:#00bfff}.box{background:#2a2a2a;padding:20px;border-radius:8px;max-width:600px}";
-  html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;cursor:pointer}";
+  html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;cursor:pointer;margin:5px}";
   html += "#status{margin-top:20px;padding:10px}.success{background:#004d00;color:#0f0}";
-  html += ".error{background:#4d0000;color:#f00}</style></head><body>";
-  html += "<h1>Upload JSON</h1><div class='box'><h3>Upload Screen Layout</h3>";
+  html += ".error{background:#4d0000;color:#f00}.info{background:#003d5c;color:#00bfff}";
+  html += ".note{background:#2a2a2a;padding:10px;margin:10px 0;border-left:3px solid #00bfff}</style></head><body>";
+  html += "<h1>Upload JSON Layout</h1><div class='box'>";
+  html += "<div class='note'><strong>Note:</strong> After upload, device must reboot to load new layouts.</div>";
+  html += "<h3>Upload Screen Layout</h3>";
   html += "<form id='f' enctype='multipart/form-data'>";
   html += "<input type='file' id='file' accept='.json' required><br><br>";
-  html += "<button type='submit'>Upload</button></form>";
-  html += "<div id='status'></div></div>";
-  html += "<script>document.getElementById('f').addEventListener('submit',function(e){";
+  html += "<button type='submit'>Upload to SPIFFS</button></form>";
+  html += "<div id='status'></div>";
+  html += "<div id='reboot' style='display:none;margin-top:10px'>";
+  html += "<button onclick='reboot()'>Reboot Device Now</button></div></div>";
+  html += "<script>function reboot(){document.getElementById('status').innerHTML='Rebooting...';";
+  html += "document.getElementById('status').className='info';fetch('/api/reboot').then(()=>{";
+  html += "setTimeout(()=>{window.location.href='/'},3000)});}";
+  html += "document.getElementById('f').addEventListener('submit',function(e){";
   html += "e.preventDefault();let file=document.getElementById('file').files[0];";
   html += "if(!file)return;let s=document.getElementById('status');";
-  html += "s.innerHTML='Uploading...';s.className='';let fd=new FormData();";
+  html += "s.innerHTML='Uploading to SPIFFS...';s.className='info';let fd=new FormData();";
   html += "fd.append('file',file);fetch('/upload-json',{method:'POST',body:fd})";
-  html += ".then(r=>r.json()).then(d=>{if(d.success){s.innerHTML='Uploaded!';";
-  html += "s.className='success';fetch('/api/reload-screens',{method:'POST'})}";
-  html += "else{s.innerHTML='Error';s.className='error'}})";
-  html += ".catch(e=>{s.innerHTML='Failed';s.className='error'})});</script>";
+  html += ".then(r=>r.json()).then(d=>{if(d.success){";
+  html += "s.innerHTML='Upload successful! File saved to SPIFFS. Click button to reboot and load new layouts.';";
+  html += "s.className='success';document.getElementById('reboot').style.display='block'}";
+  html += "else{s.innerHTML='Upload failed';s.className='error'}})";
+  html += ".catch(e=>{s.innerHTML='Upload failed';s.className='error'})});</script>";
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -1282,6 +1191,12 @@ void setupWebServer() {
   server.on("/api/admin/save", HTTP_POST, handleAPIAdminSave);
   server.on("/api/reset-wifi", HTTP_POST, handleAPIResetWiFi);
   server.on("/api/restart", HTTP_POST, handleAPIRestart);
+  server.on("/api/reboot", HTTP_GET, []() {
+      server.send(200, "application/json",
+          "{\"status\":\"Rebooting device...\",\"message\":\"Device will restart in 1 second\"}");
+      delay(1000);  // Let response send
+      ESP.restart();
+  });
   server.on("/api/wifi/connect", HTTP_POST, handleAPIWiFiConnect);
   server.on("/api/reload-screens", HTTP_POST, handleAPIReloadScreens);
   // PHASE 2: Re-enabled with SPIFFS-based upload (safe)
