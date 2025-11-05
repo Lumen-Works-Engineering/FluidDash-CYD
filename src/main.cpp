@@ -839,6 +839,11 @@ void processQueuedLayoutReload() {
 
     Serial.println("[Layouts] Processing queued reload...");
 
+    // CRITICAL: Yield and delay to let WebServer settle
+    yield();
+    delay(50);  // Let any pending WebServer operations complete
+    yield();
+
     int loaded = 0;
 
     // Load each layout with yield() between operations
@@ -920,14 +925,18 @@ void loop() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
+      yield();  // Yield before WebSocket operations
       webSocket.loop();
-      
+      yield();  // Yield after WebSocket operations
+
       // Always poll for status - FluidNC doesn't have automatic reporting
       if (fluidncConnected && (millis() - lastStatusRequest >= cfg.status_update_rate)) {
           if (debugWebSocket) {
               Serial.println("[FluidNC] Sending status request");
           }
+          yield();  // Yield before send
           webSocket.sendTXT("?");
+          yield();  // Yield after send
           lastStatusRequest = millis();
       }
       
@@ -1111,9 +1120,8 @@ void handleAPIReloadScreens() {
         "{\"status\":\"Layout reload queued\",\"message\":\"Layouts will reload on next cycle\"}");
 }
 
-/* DISABLED: Phase 1 - Upload functionality temporarily removed
- * Will re-enable in Phase 2 with SPIFFS-based upload system
- *
+// ========== PHASE 2: SPIFFS-BASED UPLOAD SYSTEM ==========
+
 void handleUpload() {
   String html = "<!DOCTYPE html><html><head><title>Upload JSON</title>";
   html += "<style>body{font-family:Arial;margin:20px;background:#1a1a1a;color:#fff}";
@@ -1164,8 +1172,8 @@ void handleUploadJSON() {
     } else if (upload.status == UPLOAD_FILE_WRITE) {
         if (!uploadError && upload.currentSize) {
             // Accumulate data in memory
-            if (uploadData.length() + upload.currentSize > MAX_UPLOAD_SIZE) {
-                Serial.println("[Upload] File too large");
+            if (uploadData.length() + upload.currentSize > 8192) {
+                Serial.println("[Upload] File too large (max 8KB)");
                 uploadError = true;
                 return;
             }
@@ -1177,12 +1185,17 @@ void handleUploadJSON() {
 
     } else if (upload.status == UPLOAD_FILE_END) {
         if (!uploadError) {
-            // Queue the complete upload
-            if (uploadQueue.enqueue(uploadFilename, uploadData)) {
-                Serial.printf("[Upload] Queued: %s (%d bytes)\n",
-                             uploadFilename.c_str(), uploadData.length());
+            // PHASE 2: Write directly to SPIFFS (safe - no SD mutex issues)
+            String filepath = "/screens/" + uploadFilename;
+
+            Serial.printf("[Upload] Saving %d bytes to SPIFFS: %s\n",
+                         uploadData.length(), filepath.c_str());
+
+            if (storage.saveFile(filepath.c_str(), uploadData)) {
+                Serial.println("[Upload] SUCCESS: Saved to SPIFFS");
+                uploadError = false;
             } else {
-                Serial.println("[Upload] ERROR: Queue full");
+                Serial.println("[Upload] ERROR: SPIFFS write failed");
                 uploadError = true;
             }
         }
@@ -1197,157 +1210,24 @@ void handleUploadComplete() {
     if (uploadError) {
         server.send(500, "application/json", "{\"success\":false,\"message\":\"Upload failed\"}");
     } else {
-        server.send(200, "application/json", "{\"success\":true,\"message\":\"Upload queued\"}");
+        server.send(200, "application/json",
+            "{\"success\":true,\"message\":\"Uploaded to SPIFFS successfully\"}");
     }
 }
 
 void handleUploadStatus() {
-    // Return status of upload queue
+    // Return storage status (SPIFFS-based system)
     JsonDocument doc;
-    doc["queueSize"] = uploadQueue.size();
-    doc["hasPending"] = uploadQueue.hasPending();
-
-    if (uploadQueue.hasPending()) {
-        UploadCommand next = uploadQueue.peek();
-        doc["nextFilename"] = next.filename;
-        doc["nextSize"] = next.data.length();
-    }
+    doc["spiffsAvailable"] = storage.isSPIFFSAvailable();
+    doc["sdAvailable"] = storage.isSDAvailable();
+    doc["message"] = "Upload saves to SPIFFS, auto-loads on reload";
 
     String response;
     serializeJson(doc, response);
     server.send(200, "application/json", response);
 }
 
-// Process queued uploads - called from main loop only
-bool processQueuedUpload() {
-    // Check if there's a pending upload
-    if (!uploadQueue.hasPending()) {
-        return true;
-    }
-
-    // Get (but don't remove yet) the command
-    UploadCommand cmd = uploadQueue.peek();
-
-    Serial.printf("[Upload] Processing: %s (%d bytes)\n",
-                  cmd.filename.c_str(), cmd.data.length());
-
-    // Safe SD access - only called from loop()
-    try {
-        // CRITICAL: Yield before ANY SD operation
-        yield();
-        delay(5);  // Let SD library settle
-        yield();
-
-        // Ensure directory exists - BUILD PATH SAFELY
-        String screenDir = "/screens";
-
-        if (!SD.exists(screenDir)) {
-            Serial.println("[Upload] Creating /screens directory...");
-            yield();
-
-            if (!SD.mkdir(screenDir)) {
-                Serial.println("[Upload] ERROR: Failed to create /screens directory");
-                uploadQueue.dequeue();
-                return false;
-            }
-
-            yield();
-            delay(5);  // Let directory creation settle
-        }
-
-        yield();
-
-        // BUILD FILEPATH SAFELY - before opening file
-        String fullPath = screenDir + "/" + cmd.filename;
-        Serial.printf("[Upload] Full path: %s\n", fullPath.c_str());
-
-        yield();
-        delay(10);  // Critical pause before file open
-        yield();
-
-        // Open file with retry logic
-        File file;
-        int retries = 3;
-
-        while (retries > 0 && !file) {
-            Serial.printf("[Upload] Attempting to open file (retry %d)...\n", 4 - retries);
-
-            file = SD.open(fullPath, FILE_WRITE);
-
-            if (!file) {
-                retries--;
-                if (retries > 0) {
-                    yield();
-                    delay(20);  // Wait before retry
-                    yield();
-                }
-            }
-        }
-
-        if (!file) {
-            Serial.printf("[Upload] ERROR: Failed to open file for writing: %s\n",
-                         fullPath.c_str());
-            uploadQueue.dequeue();
-            return false;
-        }
-
-        Serial.println("[Upload] File opened successfully, writing data...");
-        yield();
-
-        // CRITICAL: Write data in chunks with frequent yields
-        const char* dataStr = cmd.data.c_str();
-        size_t dataLen = cmd.data.length();
-        size_t bytesWritten = 0;
-        const size_t CHUNK_SIZE = 512;  // Write in 512-byte chunks
-
-        for (size_t i = 0; i < dataLen; i += CHUNK_SIZE) {
-            size_t chunkLen = (i + CHUNK_SIZE > dataLen) ? (dataLen - i) : CHUNK_SIZE;
-
-            // Write chunk using write() instead of print()
-            size_t written = file.write((uint8_t*)(dataStr + i), chunkLen);
-            bytesWritten += written;
-
-            // CRITICAL: Yield after each chunk
-            yield();
-
-            if (written != chunkLen) {
-                Serial.printf("[Upload] WARNING: Partial chunk write at offset %d\n", i);
-                break;  // Stop if write incomplete
-            }
-        }
-
-        Serial.printf("[Upload] Data write complete: %d bytes written\n", bytesWritten);
-        yield();
-
-        // Close file
-        file.close();
-        yield();
-        delay(10);  // Let file close settle
-        yield();
-
-        // Verify write
-        if (bytesWritten == cmd.data.length()) {
-            Serial.printf("[Upload] SUCCESS: %s (%d bytes written)\n",
-                         cmd.filename.c_str(), bytesWritten);
-            uploadQueue.dequeue();  // Remove successful command
-            return true;
-        } else {
-            Serial.printf("[Upload] ERROR: Partial write - expected %d, got %d\n",
-                         cmd.data.length(), bytesWritten);
-
-            // Delete incomplete file
-            SD.remove(fullPath);
-            uploadQueue.dequeue();
-            return false;
-        }
-
-    } catch (const std::exception& e) {
-        Serial.printf("[Upload] EXCEPTION: %s\n", e.what());
-        uploadQueue.dequeue();
-        return false;
-    }
-}
-*/ // END DISABLED upload functionality
+// ========== END PHASE 2 UPLOAD SYSTEM ==========
 
 void handleGetJSON() {
   // DISABLED - was causing crashes with SD card access
@@ -1404,10 +1284,10 @@ void setupWebServer() {
   server.on("/api/restart", HTTP_POST, handleAPIRestart);
   server.on("/api/wifi/connect", HTTP_POST, handleAPIWiFiConnect);
   server.on("/api/reload-screens", HTTP_POST, handleAPIReloadScreens);
-  // DISABLED: Phase 1 - Upload endpoints temporarily removed
-  // server.on("/api/upload-status", HTTP_GET, handleUploadStatus);
-  // server.on("/upload", HTTP_GET, handleUpload);
-  // server.on("/upload-json", HTTP_POST, handleUploadComplete, handleUploadJSON);
+  // PHASE 2: Re-enabled with SPIFFS-based upload (safe)
+  server.on("/api/upload-status", HTTP_GET, handleUploadStatus);
+  server.on("/upload", HTTP_GET, handleUpload);
+  server.on("/upload-json", HTTP_POST, handleUploadComplete, handleUploadJSON);
   server.on("/get-json", HTTP_GET, handleGetJSON);
   server.on("/save-json", HTTP_POST, handleSaveJSON);
   server.on("/editor", HTTP_GET, handleEditor);

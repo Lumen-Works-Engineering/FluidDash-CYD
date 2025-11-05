@@ -88,9 +88,15 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     Serial.printf("[JSON] Loaded %d bytes from %s (%s)\n",
                   jsonContent.length(), filename, storage.getStorageType(filename).c_str());
 
-    // Parse JSON
+    // CRITICAL: Yield before JSON parsing (prevents mutex deadlock)
+    yield();
+
+    // Parse JSON - use heap allocation to avoid stack issues
     JsonDocument doc;
+
+    yield();  // Yield before deserialize
     DeserializationError error = deserializeJson(doc, jsonContent);
+    yield();  // Yield after deserialize
 
     if (error) {
         Serial.printf("[JSON] Parse error: %s\n", error.c_str());
@@ -117,6 +123,8 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
             break;
         }
 
+        yield();  // Yield during element parsing loop
+
         ScreenElement& se = layout.elements[elementIndex];
 
         // Parse element properties
@@ -139,6 +147,8 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
 
         elementIndex++;
     }
+
+    yield();  // Final yield after parsing complete
 
     layout.elementCount = elementIndex;
     layout.isValid = true;

@@ -114,6 +114,16 @@ bool StorageManager::saveFile(const char* path, const String& content) {
         return false;
     }
 
+    // Ensure parent directory exists
+    if (!LittleFS.exists("/screens")) {
+        Serial.println("[StorageMgr] Creating /screens directory in SPIFFS...");
+        if (!LittleFS.mkdir("/screens")) {
+            Serial.println("[StorageMgr] ERROR: Failed to create /screens directory");
+            return false;
+        }
+        Serial.println("[StorageMgr] /screens directory created successfully");
+    }
+
     Serial.printf("[StorageMgr] Saving %s to SPIFFS\n", path);
     return writeFile(LittleFS, path, content);
 }
