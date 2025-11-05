@@ -425,6 +425,26 @@ const char ADMIN_HTML[] PROGMEM = R"rawliteral(
       <button type='submit'>💾 Save Calibration</button>
       <button type='button' class='back-btn' onclick='location.href="/"'>← Back</button>
     </form>
+
+    <div class='card' style='margin-top:30px;border-top:3px solid #ff6600'>
+      <h2>🕒 Real-Time Clock (RTC)</h2>
+      <p style='color:#aaa'>Set the current date and time for the DS3231 RTC module</p>
+
+      <div id='currentTime' class='current-reading' style='margin-bottom:20px'>Loading...</div>
+
+      <form id='rtcForm'>
+        <label>Date (YYYY-MM-DD)</label>
+        <input type='date' id='rtcDate' required>
+
+        <label>Time (HH:MM:SS)</label>
+        <input type='time' id='rtcTime' step='1' required>
+
+        <div class='success' id='rtcSuccess'>RTC time set successfully!</div>
+
+        <button type='submit'>⏰ Set RTC Time</button>
+        <button type='button' onclick='setRTCNow()'>📅 Use Browser Time</button>
+      </form>
+    </div>
   </div>
 
   <script>
@@ -459,8 +479,55 @@ const char ADMIN_HTML[] PROGMEM = R"rawliteral(
       });
     });
 
+    function updateRTCTime() {
+      fetch('/api/rtc')
+        .then(r => r.json())
+        .then(data => {
+          if (data.timestamp) {
+            document.getElementById('currentTime').innerHTML =
+              `Current RTC Time: ${data.timestamp}`;
+          }
+        });
+    }
+
+    function setRTCNow() {
+      const now = new Date();
+      const date = now.toISOString().split('T')[0];
+      const time = now.toTimeString().split(' ')[0];
+      document.getElementById('rtcDate').value = date;
+      document.getElementById('rtcTime').value = time;
+    }
+
+    document.getElementById('rtcForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      const date = document.getElementById('rtcDate').value;
+      const time = document.getElementById('rtcTime').value;
+
+      const formData = new URLSearchParams();
+      formData.append('date', date);
+      formData.append('time', time);
+
+      fetch('/api/rtc/set', {
+        method: 'POST',
+        body: formData
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          document.getElementById('rtcSuccess').style.display = 'block';
+          setTimeout(() => {
+            document.getElementById('rtcSuccess').style.display = 'none';
+          }, 3000);
+          updateRTCTime();
+        }
+      });
+    });
+
     updateReadings();
+    updateRTCTime();
     setInterval(updateReadings, 2000);
+    setInterval(updateRTCTime, 5000);
   </script>
 </body>
 </html>
@@ -1020,6 +1087,62 @@ void handleAPIReloadScreens() {
     ESP.restart();
 }
 
+void handleAPIRTC() {
+    // Get current time from RTC
+    DateTime now = rtc.now();
+
+    char timestamp[32];
+    snprintf(timestamp, sizeof(timestamp), "%04d-%02d-%02d %02d:%02d:%02d",
+             now.year(), now.month(), now.day(),
+             now.hour(), now.minute(), now.second());
+
+    String json = "{\"success\":true,\"timestamp\":\"";
+    json += timestamp;
+    json += "\"}";
+
+    server.send(200, "application/json", json);
+}
+
+void handleAPIRTCSet() {
+    // Parse date and time from POST parameters
+    if (!server.hasArg("date") || !server.hasArg("time")) {
+        server.send(400, "application/json",
+            "{\"success\":false,\"error\":\"Missing date or time parameter\"}");
+        return;
+    }
+
+    String dateStr = server.arg("date");  // Format: YYYY-MM-DD
+    String timeStr = server.arg("time");  // Format: HH:MM:SS
+
+    // Parse date: YYYY-MM-DD
+    int year = dateStr.substring(0, 4).toInt();
+    int month = dateStr.substring(5, 7).toInt();
+    int day = dateStr.substring(8, 10).toInt();
+
+    // Parse time: HH:MM:SS
+    int hour = timeStr.substring(0, 2).toInt();
+    int minute = timeStr.substring(3, 5).toInt();
+    int second = timeStr.substring(6, 8).toInt();
+
+    // Validate ranges
+    if (year < 2000 || year > 2099 || month < 1 || month > 12 ||
+        day < 1 || day > 31 || hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59 || second < 0 || second > 59) {
+        server.send(400, "application/json",
+            "{\"success\":false,\"error\":\"Invalid date/time values\"}");
+        return;
+    }
+
+    // Set the RTC time
+    rtc.adjust(DateTime(year, month, day, hour, minute, second));
+
+    Serial.printf("[RTC] Time set to: %04d-%02d-%02d %02d:%02d:%02d\n",
+                  year, month, day, hour, minute, second);
+
+    server.send(200, "application/json",
+        "{\"success\":true,\"message\":\"RTC time updated successfully\"}");
+}
+
 // ========== PHASE 2: SPIFFS-BASED UPLOAD SYSTEM ==========
 
 void handleUpload() {
@@ -1199,6 +1322,8 @@ void setupWebServer() {
   });
   server.on("/api/wifi/connect", HTTP_POST, handleAPIWiFiConnect);
   server.on("/api/reload-screens", HTTP_POST, handleAPIReloadScreens);
+  server.on("/api/rtc", HTTP_GET, handleAPIRTC);
+  server.on("/api/rtc/set", HTTP_POST, handleAPIRTCSet);
   // PHASE 2: Re-enabled with SPIFFS-based upload (safe)
   server.on("/api/upload-status", HTTP_GET, handleUploadStatus);
   server.on("/upload", HTTP_GET, handleUpload);
