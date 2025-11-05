@@ -56,11 +56,12 @@ public:
 #include <ArduinoJson.h>
 #include "upload_queue.h"
 
-// SD card mutex for synchronous WebServer
-SemaphoreHandle_t sdMutex = NULL;
-
 // Upload queue - handlers queue uploads, loop() executes them
 SDUploadQueue uploadQueue;
+
+// Layout reload queue - web handler queues, loop processes
+volatile bool needsLayoutReload = false;
+volatile bool isReloadingLayouts = false;
 
 // Display instance is now in display.cpp (extern declaration in display.h)
 RTC_DS3231 rtc;
@@ -135,6 +136,7 @@ bool buttonPressed = false;
 
 // ========== Function Prototypes ==========
 void setupWebServer();
+bool processQueuedUpload();
 String getMainHTML();
 String getSettingsHTML();
 String getAdminHTML();
@@ -601,9 +603,6 @@ void setup() {
   Serial.begin(115200);
   Serial.println("FluidDash - Starting...");
 
-  // Create SD mutex for WebServer
-  sdMutex = xSemaphoreCreateMutex();
-
   // Initialize default configuration
   initDefaultConfig();
 
@@ -827,9 +826,64 @@ void setup() {
   feedLoopWDT();
 }
 
+// Process queued layout reload - called from loop() only
+void processQueuedLayoutReload() {
+    // Skip if not needed or already processing
+    if (!needsLayoutReload || isReloadingLayouts) {
+        return;
+    }
+
+    // Mark as processing
+    isReloadingLayouts = true;
+
+    Serial.println("[Layouts] Processing queued reload...");
+
+    int loaded = 0;
+
+    // Load each layout with yield() between operations
+    if (loadScreenConfig("/screens/monitor.json", monitorLayout)) {
+        loaded++;
+        Serial.println("[Layouts] ✓ Monitor layout loaded");
+    }
+    yield();
+
+    if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) {
+        loaded++;
+        Serial.println("[Layouts] ✓ Alignment layout loaded");
+    }
+    yield();
+
+    if (loadScreenConfig("/screens/graph.json", graphLayout)) {
+        loaded++;
+        Serial.println("[Layouts] ✓ Graph layout loaded");
+    }
+    yield();
+
+    if (loadScreenConfig("/screens/network.json", networkLayout)) {
+        loaded++;
+        Serial.println("[Layouts] ✓ Network layout loaded");
+    }
+    yield();
+
+    // Redraw screen with new layouts
+    drawScreen();
+    yield();
+
+    Serial.printf("[Layouts] ✓ Reload complete: %d layouts loaded\n", loaded);
+
+    // Clear flags
+    needsLayoutReload = false;
+    isReloadingLayouts = false;
+}
+
 void loop() {
   // Handle web server requests
   server.handleClient();
+
+  // Process queued layout reload (safe - only in loop context)
+  if (needsLayoutReload && !isReloadingLayouts) {
+    processQueuedLayoutReload();
+  }
 
   // Process one queued upload per loop iteration (safe SD access)
   // This prevents blocking and spreads processing over time
@@ -1032,33 +1086,27 @@ void handleAPIWiFiConnect() {
 }
 
 void handleAPIReloadScreens() {
-  if (!sdCardAvailable) {
-    server.send(200, "application/json", "{\"success\":false,\"message\":\"SD card not available\"}");
-    return;
-  }
+    // Check if already reloading to prevent queue overflow
+    if (isReloadingLayouts) {
+        server.send(503, "application/json",
+            "{\"error\":\"Layout reload already in progress\"}");
+        return;
+    }
 
-  xSemaphoreTake(sdMutex, portMAX_DELAY);
-  Serial.println("[JSON] Reloading screen layouts...");
+    // Check if one is already queued
+    if (needsLayoutReload) {
+        server.send(200, "application/json",
+            "{\"status\":\"Layout reload already queued\"}");
+        return;
+    }
 
-  int loaded = 0;
-  if (loadScreenConfig("/screens/monitor.json", monitorLayout)) loaded++;
-  yield();
-  if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) loaded++;
-  yield();
-  if (loadScreenConfig("/screens/graph.json", graphLayout)) loaded++;
-  yield();
-  if (loadScreenConfig("/screens/network.json", networkLayout)) loaded++;
-  yield();
-  xSemaphoreGive(sdMutex);
+    // Queue the reload - don't execute here
+    Serial.println("[API] Layout reload queued from web request");
+    needsLayoutReload = true;
 
-  // Redraw current screen
-  drawScreen();
-
-  char response[128];
-  sprintf(response, "{\"success\":true,\"message\":\"Reloaded %d layouts\"}", loaded);
-  server.send(200, "application/json", response);
-
-  Serial.printf("[JSON] Reloaded %d layouts\n", loaded);
+    // Return immediately - don't block
+    server.send(200, "application/json",
+        "{\"status\":\"Layout reload queued\",\"message\":\"Layouts will reload on next cycle\"}");
 }
 
 void handleUpload() {
@@ -1086,47 +1134,71 @@ void handleUpload() {
   server.send(200, "text/html", html);
 }
 
+// Static variables shared between upload handler and completion handler
+static String uploadData;
+static String uploadFilename;
+static bool uploadError = false;
+
 void handleUploadJSON() {
-    // Validate request
-    if (!server.hasArg("filename") || !server.hasArg("data")) {
-        server.send(400, "application/json", "{\"error\":\"Missing filename or data\"}");
-        return;
+    HTTPUpload& upload = server.upload();
+
+    if (upload.status == UPLOAD_FILE_START) {
+        uploadError = false;
+        uploadData = "";
+        uploadFilename = upload.filename;
+
+        // Validate filename
+        if (!uploadFilename.endsWith(".json")) {
+            Serial.println("[Upload] Not a JSON file");
+            uploadError = true;
+            return;
+        }
+
+        Serial.printf("[Upload] Starting: %s\n", uploadFilename.c_str());
+
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (!uploadError && upload.currentSize) {
+            // Accumulate data in memory
+            if (uploadData.length() + upload.currentSize > MAX_UPLOAD_SIZE) {
+                Serial.println("[Upload] File too large");
+                uploadError = true;
+                return;
+            }
+            // Append chunk to uploadData
+            for (size_t i = 0; i < upload.currentSize; i++) {
+                uploadData += (char)upload.buf[i];
+            }
+        }
+
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (!uploadError) {
+            // Queue the complete upload
+            if (uploadQueue.enqueue(uploadFilename, uploadData)) {
+                Serial.printf("[Upload] Queued: %s (%d bytes)\n",
+                             uploadFilename.c_str(), uploadData.length());
+            } else {
+                Serial.println("[Upload] ERROR: Queue full");
+                uploadError = true;
+            }
+        }
+        // Clear accumulated data
+        uploadData = "";
+        uploadFilename = "";
     }
+}
 
-    String filename = server.arg("filename");
-    String data = server.arg("data");
-
-    // Validate filename (security)
-    if (filename.length() == 0 || filename.length() > 255) {
-        server.send(400, "application/json", "{\"error\":\"Invalid filename\"}");
-        return;
-    }
-
-    // Ensure .json extension
-    if (!filename.endsWith(".json")) {
-        filename += ".json";
-    }
-
-    // Validate data size
-    if (data.length() > MAX_UPLOAD_SIZE) {
-        server.send(413, "application/json",
-                   "{\"error\":\"File too large\"}");
-        return;
-    }
-
-    // Queue the upload - do NOT execute here
-    if (uploadQueue.enqueue(filename, data)) {
-        server.send(200, "application/json",
-                   "{\"status\":\"Upload queued\",\"filename\":\"" + filename + "\"}");
+void handleUploadComplete() {
+    // This is called after the upload finishes - send response to client
+    if (uploadError) {
+        server.send(500, "application/json", "{\"success\":false,\"message\":\"Upload failed\"}");
     } else {
-        server.send(503, "application/json",
-                   "{\"error\":\"Upload queue full, try again\"}");
+        server.send(200, "application/json", "{\"success\":true,\"message\":\"Upload queued\"}");
     }
 }
 
 void handleUploadStatus() {
     // Return status of upload queue
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     doc["queueSize"] = uploadQueue.size();
     doc["hasPending"] = uploadQueue.hasPending();
 
@@ -1156,27 +1228,99 @@ bool processQueuedUpload() {
 
     // Safe SD access - only called from loop()
     try {
-        // Ensure directory exists
-        if (!SD.exists("/screens")) {
-            if (!SD.mkdir("/screens")) {
+        // CRITICAL: Yield before ANY SD operation
+        yield();
+        delay(5);  // Let SD library settle
+        yield();
+
+        // Ensure directory exists - BUILD PATH SAFELY
+        String screenDir = "/screens";
+
+        if (!SD.exists(screenDir)) {
+            Serial.println("[Upload] Creating /screens directory...");
+            yield();
+
+            if (!SD.mkdir(screenDir)) {
                 Serial.println("[Upload] ERROR: Failed to create /screens directory");
-                uploadQueue.dequeue();  // Remove failed command
+                uploadQueue.dequeue();
                 return false;
+            }
+
+            yield();
+            delay(5);  // Let directory creation settle
+        }
+
+        yield();
+
+        // BUILD FILEPATH SAFELY - before opening file
+        String fullPath = screenDir + "/" + cmd.filename;
+        Serial.printf("[Upload] Full path: %s\n", fullPath.c_str());
+
+        yield();
+        delay(10);  // Critical pause before file open
+        yield();
+
+        // Open file with retry logic
+        File file;
+        int retries = 3;
+
+        while (retries > 0 && !file) {
+            Serial.printf("[Upload] Attempting to open file (retry %d)...\n", 4 - retries);
+
+            file = SD.open(fullPath, FILE_WRITE);
+
+            if (!file) {
+                retries--;
+                if (retries > 0) {
+                    yield();
+                    delay(20);  // Wait before retry
+                    yield();
+                }
             }
         }
 
-        // Write file
-        File file = SD.open("/screens/" + cmd.filename, FILE_WRITE);
         if (!file) {
             Serial.printf("[Upload] ERROR: Failed to open file for writing: %s\n",
-                         cmd.filename.c_str());
-            uploadQueue.dequeue();  // Remove failed command
+                         fullPath.c_str());
+            uploadQueue.dequeue();
             return false;
         }
 
-        size_t bytesWritten = file.print(cmd.data);
-        file.close();
+        Serial.println("[Upload] File opened successfully, writing data...");
+        yield();
 
+        // CRITICAL: Write data in chunks with frequent yields
+        const char* dataStr = cmd.data.c_str();
+        size_t dataLen = cmd.data.length();
+        size_t bytesWritten = 0;
+        const size_t CHUNK_SIZE = 512;  // Write in 512-byte chunks
+
+        for (size_t i = 0; i < dataLen; i += CHUNK_SIZE) {
+            size_t chunkLen = (i + CHUNK_SIZE > dataLen) ? (dataLen - i) : CHUNK_SIZE;
+
+            // Write chunk using write() instead of print()
+            size_t written = file.write((uint8_t*)(dataStr + i), chunkLen);
+            bytesWritten += written;
+
+            // CRITICAL: Yield after each chunk
+            yield();
+
+            if (written != chunkLen) {
+                Serial.printf("[Upload] WARNING: Partial chunk write at offset %d\n", i);
+                break;  // Stop if write incomplete
+            }
+        }
+
+        Serial.printf("[Upload] Data write complete: %d bytes written\n", bytesWritten);
+        yield();
+
+        // Close file
+        file.close();
+        yield();
+        delay(10);  // Let file close settle
+        yield();
+
+        // Verify write
         if (bytesWritten == cmd.data.length()) {
             Serial.printf("[Upload] SUCCESS: %s (%d bytes written)\n",
                          cmd.filename.c_str(), bytesWritten);
@@ -1185,13 +1329,16 @@ bool processQueuedUpload() {
         } else {
             Serial.printf("[Upload] ERROR: Partial write - expected %d, got %d\n",
                          cmd.data.length(), bytesWritten);
-            uploadQueue.dequeue();  // Remove failed command
+
+            // Delete incomplete file
+            SD.remove(fullPath);
+            uploadQueue.dequeue();
             return false;
         }
 
     } catch (const std::exception& e) {
         Serial.printf("[Upload] EXCEPTION: %s\n", e.what());
-        uploadQueue.dequeue();  // Remove failed command
+        uploadQueue.dequeue();
         return false;
     }
 }
@@ -1210,11 +1357,9 @@ void handleSaveJSON() {
   String filename = server.arg("filename");
   String content = server.arg("content");
 
-  xSemaphoreTake(sdMutex, portMAX_DELAY);
   File file = SD.open(filename, FILE_WRITE);
   yield();
   if (!file) {
-    xSemaphoreGive(sdMutex);
     server.send(500, "text/plain", "Failed to open file for writing");
     return;
   }
@@ -1223,7 +1368,6 @@ void handleSaveJSON() {
   yield();
   file.close();
   yield();
-  xSemaphoreGive(sdMutex);
 
   server.send(200, "text/plain", "File saved successfully");
 }
@@ -1256,7 +1400,7 @@ void setupWebServer() {
   server.on("/api/reload-screens", HTTP_POST, handleAPIReloadScreens);
   server.on("/api/upload-status", HTTP_GET, handleUploadStatus);
   server.on("/upload", HTTP_GET, handleUpload);
-  server.on("/upload-json", HTTP_POST, handleUploadJSON);
+  server.on("/upload-json", HTTP_POST, handleUploadComplete, handleUploadJSON);
   server.on("/get-json", HTTP_GET, handleGetJSON);
   server.on("/save-json", HTTP_POST, handleSaveJSON);
   server.on("/editor", HTTP_GET, handleEditor);
