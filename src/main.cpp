@@ -54,10 +54,14 @@ public:
 #include <SD.h>
 #include <SPI.h>
 #include <ArduinoJson.h>
-#include "upload_queue.h"
+// #include "upload_queue.h"  // DISABLED: Phase 1 - will re-enable in Phase 2 with SPIFFS
+#include "storage_manager.h"
+
+// Storage manager - handles SD/SPIFFS with fallback
+StorageManager storage;
 
 // Upload queue - handlers queue uploads, loop() executes them
-SDUploadQueue uploadQueue;
+// SDUploadQueue uploadQueue;  // DISABLED: Phase 1 - will re-enable in Phase 2 with SPIFFS
 
 // Layout reload queue - web handler queues, loop processes
 volatile bool needsLayoutReload = false;
@@ -136,7 +140,7 @@ bool buttonPressed = false;
 
 // ========== Function Prototypes ==========
 void setupWebServer();
-bool processQueuedUpload();
+// bool processQueuedUpload();  // DISABLED: Phase 1 - will re-enable in Phase 2 with SPIFFS
 String getMainHTML();
 String getSettingsHTML();
 String getAdminHTML();
@@ -698,51 +702,48 @@ void setup() {
     Serial.println("WiFi Connected!");
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
-    // ========== ADD SD CARD TEST HERE ==========
+    // ========== INITIALIZE STORAGE MANAGER ==========
     feedLoopWDT();
-    Serial.println("\n=== Testing SD Card ===");
-    
-    // Initialize SD card on VSPI bus
+    Serial.println("\n=== Initializing Storage Manager ===");
+
+    // Initialize SD card on VSPI bus (needed before StorageManager)
     SPIClass spiSD(VSPI);
     spiSD.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    
-    if (SD.begin(SD_CS, spiSD)) {
-        sdCardAvailable = true;
-        Serial.println("SUCCESS: SD card initialized!");
-        
-        // Get card info
-        uint8_t cardType = SD.cardType();
-        Serial.print("SD Card Type: ");
-        if (cardType == CARD_MMC) {
-            Serial.println("MMC");
-        } else if (cardType == CARD_SD) {
-            Serial.println("SDSC");
-        } else if (cardType == CARD_SDHC) {
-            Serial.println("SDHC");
-        } else {
-            Serial.println("Unknown");
-        }
-        
-        uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-        Serial.printf("SD Card Size: %lluMB\n", cardSize);
-        
-        // Create screens directory for Phase 2
-        if (!SD.exists("/screens")) {
-            if (SD.mkdir("/screens")) {
-                Serial.println("Created directory: /screens");
+    SD.begin(SD_CS, spiSD);  // Attempt SD init (no error if fails)
+
+    // Initialize StorageManager (handles SD + SPIFFS with fallback)
+    if (storage.begin()) {
+        Serial.println("SUCCESS: Storage Manager initialized!");
+        sdCardAvailable = storage.isSDAvailable();
+
+        if (sdCardAvailable) {
+            Serial.println("  - SD card available");
+            uint8_t cardType = SD.cardType();
+            Serial.print("  - SD Card Type: ");
+            if (cardType == CARD_MMC) {
+                Serial.println("MMC");
+            } else if (cardType == CARD_SD) {
+                Serial.println("SDSC");
+            } else if (cardType == CARD_SDHC) {
+                Serial.println("SDHC");
             } else {
-                Serial.println("Failed to create /screens directory");
+                Serial.println("Unknown");
             }
+            uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+            Serial.printf("  - SD Card Size: %lluMB\n", cardSize);
         } else {
-            Serial.println("Directory exists: /screens");
+            Serial.println("  - SD card not available, using SPIFFS");
         }
-        
+
+        if (storage.isSPIFFSAvailable()) {
+            Serial.println("  - SPIFFS available");
+        }
     } else {
+        Serial.println("ERROR: Storage Manager initialization failed!");
         sdCardAvailable = false;
-        Serial.println("WARNING: SD card not detected");
-        Serial.println("Insert SD card and restart for Phase 2 features\n");
     }
-    // ========== END SD CARD TEST ==========
+    Serial.println("=== Storage Manager Ready ===\n");
+    // ========== END STORAGE MANAGER INIT ==========
     // ========== PHASE 2: LOAD JSON SCREEN LAYOUTS ==========
     feedLoopWDT();
     initDefaultLayouts();  // Initialize fallback state
@@ -887,10 +888,11 @@ void loop() {
 
   // Process one queued upload per loop iteration (safe SD access)
   // This prevents blocking and spreads processing over time
-  if (uploadQueue.hasPending()) {
-    processQueuedUpload();
-    yield();  // Feed watchdog during upload processing
-  }
+  // DISABLED: Phase 1 - will re-enable in Phase 2 with SPIFFS
+  // if (uploadQueue.hasPending()) {
+  //   processQueuedUpload();
+  //   yield();  // Feed watchdog during upload processing
+  // }
 
   // Feed the watchdog timer at the start of each loop iteration
   feedLoopWDT();
@@ -1109,6 +1111,9 @@ void handleAPIReloadScreens() {
         "{\"status\":\"Layout reload queued\",\"message\":\"Layouts will reload on next cycle\"}");
 }
 
+/* DISABLED: Phase 1 - Upload functionality temporarily removed
+ * Will re-enable in Phase 2 with SPIFFS-based upload system
+ *
 void handleUpload() {
   String html = "<!DOCTYPE html><html><head><title>Upload JSON</title>";
   html += "<style>body{font-family:Arial;margin:20px;background:#1a1a1a;color:#fff}";
@@ -1342,6 +1347,7 @@ bool processQueuedUpload() {
         return false;
     }
 }
+*/ // END DISABLED upload functionality
 
 void handleGetJSON() {
   // DISABLED - was causing crashes with SD card access
@@ -1398,9 +1404,10 @@ void setupWebServer() {
   server.on("/api/restart", HTTP_POST, handleAPIRestart);
   server.on("/api/wifi/connect", HTTP_POST, handleAPIWiFiConnect);
   server.on("/api/reload-screens", HTTP_POST, handleAPIReloadScreens);
-  server.on("/api/upload-status", HTTP_GET, handleUploadStatus);
-  server.on("/upload", HTTP_GET, handleUpload);
-  server.on("/upload-json", HTTP_POST, handleUploadComplete, handleUploadJSON);
+  // DISABLED: Phase 1 - Upload endpoints temporarily removed
+  // server.on("/api/upload-status", HTTP_GET, handleUploadStatus);
+  // server.on("/upload", HTTP_GET, handleUpload);
+  // server.on("/upload-json", HTTP_POST, handleUploadComplete, handleUploadJSON);
   server.on("/get-json", HTTP_GET, handleGetJSON);
   server.on("/save-json", HTTP_POST, handleSaveJSON);
   server.on("/editor", HTTP_GET, handleEditor);

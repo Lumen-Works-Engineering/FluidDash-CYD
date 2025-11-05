@@ -1,0 +1,28 @@
+{
+  "layout_name": "Default Layout 0",
+  "background_color": "#000000",
+  "widgets": [
+    {
+      "type": "text",
+      "x": 10,
+      "y": 10,
+      "width": 300,
+      "height": 40,
+      "text": "FluidDash - Default Screen 0",
+      "font_size": 16,
+      "color": "#FFFFFF",
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 60,
+      "width": 300,
+      "height": 30,
+      "text": "Load layouts from SD or SPIFFS",
+      "font_size": 12,
+      "color": "#808080",
+      "align": "left"
+    }
+  ]
+}

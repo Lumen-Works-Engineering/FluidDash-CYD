@@ -337,3 +337,149 @@ yield() + delay(10ms)  // Post-operation settling
   - Investigate ESP32 SD library configuration
   - Test with different SD card
   - Consider SPIFFS instead of SD for uploads
+
+---
+
+## Session 5 - SPIFFS Implementation (Phase 1)
+**Date:** 2025-01-05 (continued)
+**Branch:** fix-sd-web-access
+
+### Issue
+Upload crashes persist despite all hardening efforts. Root cause: ESP32 SD library internal mutex issues unsolvable at application level.
+
+### Solution Architecture
+Implement SPIFFS-based storage with SD fallback:
+- SPIFFS as reliable primary storage (no mutex issues)
+- SD as optional secondary storage (read-only for layouts)
+- StorageManager class handles fallback chain: SD → SPIFFS → hardcoded defaults
+- Eliminates all web handler SD write operations
+- Future: Phase 2 will add web editor with SPIFFS buffer
+
+### Tasks Completed - Phase 1
+
+**TASK 1.1: Configure SPIFFS Partition**
+- [x] Added `board_build.filesystem = littlefs` to platformio.ini
+- [x] Added `board_build.partitions = default.csv` for 4MB ESP32
+
+**TASK 1.2: Create storage_manager.h**
+- [x] Created header file with StorageManager class definition
+- [x] Methods: begin(), loadFile(), saveFile(), exists(), remove()
+- [x] Storage status: isSDAvailable(), isSPIFFSAvailable()
+- [x] Cross-storage operations: copyToSPIFFS(), copyToSD()
+
+**TASK 1.3: Create storage_manager.cpp**
+- [x] Implemented StorageManager with chunked writes
+- [x] Auto-fallback: SD → SPIFFS → Empty
+- [x] Safe write pattern with yields (512-byte chunks)
+- [x] Comprehensive error handling and logging
+
+**TASK 1.4: Embed Default Layout Files**
+- [x] Created data/defaults/ directory
+- [x] Created layout_0.json (default fallback layout)
+- [x] Created layout_1.json (secondary fallback layout)
+
+**TASK 1.5: Modify main.cpp to use StorageManager**
+- [x] Added `#include "storage_manager.h"` (line 58)
+- [x] Created global `StorageManager storage;` (line 61)
+- [x] Replaced SD.begin() section with storage.begin() (lines 705-746)
+- [x] Added storage status reporting (SD + SPIFFS availability)
+
+**TASK 1.6: Update Layout Loading**
+- [x] Modified screen_renderer.cpp to include storage_manager.h
+- [x] Added `extern StorageManager storage;` declaration
+- [x] Replaced loadScreenConfig() direct SD access with storage.loadFile()
+- [x] Function now uses StorageManager with auto-fallback
+- [x] Added storage type logging (shows SD/SPIFFS source)
+
+### Files Created - Session 5
+- `src/storage_manager.h` - StorageManager class definition
+- `src/storage_manager.cpp` - Implementation with safe write patterns
+- `data/defaults/layout_0.json` - Default fallback layout
+- `data/defaults/layout_1.json` - Secondary fallback layout
+
+### Files Modified - Session 5
+
+**platformio.ini:**
+- Lines 8-9: Added LittleFS filesystem and partition configuration
+
+**src/main.cpp:**
+- Line 58: Added storage_manager.h include
+- Line 61: Created StorageManager global instance
+- Lines 705-746: Replaced SD.begin() with storage.begin() initialization
+
+**src/display/screen_renderer.cpp:**
+- Line 6: Added storage_manager.h include
+- Line 10: Added extern StorageManager storage
+- Lines 72-98: Replaced loadScreenConfig() to use storage.loadFile()
+
+### Key Implementation Details
+
+**StorageManager Architecture:**
+```cpp
+// Priority chain for reading files
+1. SD card (if available) → loadFile checks SD first
+2. SPIFFS/LittleFS → fallback if SD unavailable
+3. Empty string → if file not found anywhere
+
+// Writing always goes to SPIFFS (reliable)
+saveFile() → always writes to SPIFFS
+```
+
+**Chunked Write Pattern:**
+```cpp
+const size_t CHUNK_SIZE = 512;
+for (size_t i = 0; i < dataLen; i += CHUNK_SIZE) {
+    size_t written = file.write((uint8_t*)(data + i), chunkLen);
+    yield();  // After each chunk
+}
+```
+
+**TASK 1.7: Remove Upload Queue Code**
+- [x] Commented out upload_queue.h include
+- [x] Commented out SDUploadQueue uploadQueue global
+- [x] Commented out processQueuedUpload() forward declaration
+- [x] Commented out processQueuedUpload() call in loop()
+- [x] Commented out all upload handler functions (handleUpload, handleUploadJSON, handleUploadComplete, handleUploadStatus, processQueuedUpload)
+- [x] Commented out upload endpoint registrations in setupWebServer()
+
+### Current Status - Phase 1 COMPLETE
+- ✅ Phase 1 Tasks 1.1-1.7 all complete
+- ✅ StorageManager implemented with SD/SPIFFS fallback
+- ✅ Layout loading now uses StorageManager
+- ✅ Upload queue code disabled (Phase 2 will re-add with SPIFFS)
+- ✅ Default layout files created in data/defaults/
+- ✅ Code ready to build and test
+
+### Ready for Testing
+**Build Instructions:**
+1. Build project: `pio run` or `platformio run`
+2. Upload filesystem: `pio run --target uploadfs` (uploads data/ folder to SPIFFS)
+3. Upload firmware: `pio run --target upload`
+4. Monitor serial: Watch for "Storage Manager Ready" messages
+
+**Expected Serial Output:**
+```
+[StorageMgr] Initializing storage systems...
+[StorageMgr] SD card initialized (or not available)
+[StorageMgr] SPIFFS initialized
+SUCCESS: Storage Manager initialized!
+  - SD card available (or not available, using SPIFFS)
+  - SPIFFS available
+=== Storage Manager Ready ===
+```
+
+**Testing Checklist:**
+- [ ] Device boots without crashes
+- [ ] Storage Manager initializes successfully
+- [ ] SPIFFS filesystem accessible
+- [ ] Default layouts loaded from SPIFFS (if no SD card)
+- [ ] Layouts loaded from SD card (if SD present)
+- [ ] Web interface loads normally
+- [ ] No upload functionality (expected - disabled in Phase 1)
+- [ ] Layout reload endpoint works
+
+### Next Steps - Phase 2
+- [ ] Git commit Phase 1 completion
+- [ ] Implement SPIFFS-based web editor (instructions.md Phase 2)
+- [ ] Add edit-in-place with SPIFFS buffer
+- [ ] Optional: Sync edited files back to SD card

@@ -3,9 +3,11 @@
 #include <WiFi.h>
 #include <SD.h>
 #include <ArduinoJson.h>
+#include "../storage_manager.h"
 
 // External variables from main.cpp (needed for data access)
 extern bool sdCardAvailable;
+extern StorageManager storage;
 extern float temperatures[4];
 extern float posX, posY, posZ, posA;
 extern float wposX, wposY, wposZ, wposA;
@@ -68,45 +70,27 @@ TextAlign parseAlignment(const char* alignStr) {
 
 // Load screen configuration from JSON file
 bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
-    if (!sdCardAvailable) {
-        Serial.printf("[JSON] SD card not available, cannot load %s\n", filename);
-        return false;
-    }
-
     Serial.printf("[JSON] Loading screen config: %s\n", filename);
 
-    // Open file
-    File file = SD.open(filename, FILE_READ);
-    if (!file) {
-        Serial.printf("[JSON] Failed to open %s\n", filename);
+    // Use StorageManager to load file (auto-fallback SD->SPIFFS)
+    String jsonContent = storage.loadFile(filename);
+
+    if (jsonContent.length() == 0) {
+        Serial.printf("[JSON] File not found: %s\n", filename);
         return false;
     }
 
-    // Read file content
-    size_t fileSize = file.size();
-    if (fileSize > 8192) {
-        Serial.printf("[JSON] File too large: %d bytes (max 8192)\n", fileSize);
-        file.close();
+    if (jsonContent.length() > 8192) {
+        Serial.printf("[JSON] File too large: %d bytes (max 8192)\n", jsonContent.length());
         return false;
     }
 
-    // Allocate buffer
-    char* jsonBuffer = (char*)malloc(fileSize + 1);
-    if (!jsonBuffer) {
-        Serial.println("[JSON] Failed to allocate memory");
-        file.close();
-        return false;
-    }
-
-    // Read file
-    size_t bytesRead = file.readBytes(jsonBuffer, fileSize);
-    jsonBuffer[bytesRead] = '\0';
-    file.close();
+    Serial.printf("[JSON] Loaded %d bytes from %s (%s)\n",
+                  jsonContent.length(), filename, storage.getStorageType(filename).c_str());
 
     // Parse JSON
     JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, jsonBuffer);
-    free(jsonBuffer);
+    DeserializationError error = deserializeJson(doc, jsonContent);
 
     if (error) {
         Serial.printf("[JSON] Parse error: %s\n", error.c_str());

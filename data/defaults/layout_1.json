@@ -1,0 +1,17 @@
+{
+  "layout_name": "Default Layout 1",
+  "background_color": "#001020",
+  "widgets": [
+    {
+      "type": "text",
+      "x": 10,
+      "y": 10,
+      "width": 300,
+      "height": 40,
+      "text": "FluidDash - Default Screen 1",
+      "font_size": 16,
+      "color": "#00FFFF",
+      "align": "left"
+    }
+  ]
+}
