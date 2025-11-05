@@ -54,6 +54,13 @@ public:
 #include <SD.h>
 #include <SPI.h>
 #include <ArduinoJson.h>
+#include "upload_queue.h"
+
+// SD card mutex for synchronous WebServer
+SemaphoreHandle_t sdMutex = NULL;
+
+// Upload queue - handlers queue uploads, loop() executes them
+SDUploadQueue uploadQueue;
 
 // Display instance is now in display.cpp (extern declaration in display.h)
 RTC_DS3231 rtc;
@@ -594,6 +601,9 @@ void setup() {
   Serial.begin(115200);
   Serial.println("FluidDash - Starting...");
 
+  // Create SD mutex for WebServer
+  sdMutex = xSemaphoreCreateMutex();
+
   // Initialize default configuration
   initDefaultConfig();
 
@@ -821,6 +831,13 @@ void loop() {
   // Handle web server requests
   server.handleClient();
 
+  // Process one queued upload per loop iteration (safe SD access)
+  // This prevents blocking and spreads processing over time
+  if (uploadQueue.hasPending()) {
+    processQueuedUpload();
+    yield();  // Feed watchdog during upload processing
+  }
+
   // Feed the watchdog timer at the start of each loop iteration
   feedLoopWDT();
 
@@ -1020,6 +1037,7 @@ void handleAPIReloadScreens() {
     return;
   }
 
+  xSemaphoreTake(sdMutex, portMAX_DELAY);
   Serial.println("[JSON] Reloading screen layouts...");
 
   int loaded = 0;
@@ -1031,6 +1049,7 @@ void handleAPIReloadScreens() {
   yield();
   if (loadScreenConfig("/screens/network.json", networkLayout)) loaded++;
   yield();
+  xSemaphoreGive(sdMutex);
 
   // Redraw current screen
   drawScreen();
@@ -1068,53 +1087,113 @@ void handleUpload() {
 }
 
 void handleUploadJSON() {
-  HTTPUpload& upload = server.upload();
-  static File uploadFile;
-  static bool uploadError = false;
+    // Validate request
+    if (!server.hasArg("filename") || !server.hasArg("data")) {
+        server.send(400, "application/json", "{\"error\":\"Missing filename or data\"}");
+        return;
+    }
 
-  if (upload.status == UPLOAD_FILE_START) {
-    uploadError = false;
-    // Close any previously open file
-    if (uploadFile) uploadFile.close();
-    yield();
+    String filename = server.arg("filename");
+    String data = server.arg("data");
 
-    String filename = upload.filename;
+    // Validate filename (security)
+    if (filename.length() == 0 || filename.length() > 255) {
+        server.send(400, "application/json", "{\"error\":\"Invalid filename\"}");
+        return;
+    }
+
+    // Ensure .json extension
     if (!filename.endsWith(".json")) {
-      Serial.println("[Upload] Not a JSON file");
-      uploadError = true;
-      return;
+        filename += ".json";
     }
 
-    String path = "/screens/" + filename;
-    uploadFile = SD.open(path, FILE_WRITE);
-    yield();
-    if (!uploadFile) {
-      Serial.printf("[Upload] Cannot create %s\n", path.c_str());
-      uploadError = true;
-      return;
+    // Validate data size
+    if (data.length() > MAX_UPLOAD_SIZE) {
+        server.send(413, "application/json",
+                   "{\"error\":\"File too large\"}");
+        return;
     }
-    Serial.printf("[Upload] Starting: %s\n", filename.c_str());
-  } else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (!uploadError && uploadFile && upload.currentSize) {
-      size_t written = uploadFile.write(upload.buf, upload.currentSize);
-      yield();
-      if (written != upload.currentSize) {
-        Serial.println("[Upload] Write error");
-        uploadError = true;
-      }
+
+    // Queue the upload - do NOT execute here
+    if (uploadQueue.enqueue(filename, data)) {
+        server.send(200, "application/json",
+                   "{\"status\":\"Upload queued\",\"filename\":\"" + filename + "\"}");
+    } else {
+        server.send(503, "application/json",
+                   "{\"error\":\"Upload queue full, try again\"}");
     }
-  } else if (upload.status == UPLOAD_FILE_END) {
-    if (uploadFile) {
-      uploadFile.close();
-      yield();
-      if (!uploadError) {
-        Serial.printf("[Upload] Complete: %s\n", upload.filename.c_str());
-        server.send(200, "application/json", "{\"success\":true}");
-      } else {
-        server.send(500, "application/json", "{\"success\":false}");
-      }
+}
+
+void handleUploadStatus() {
+    // Return status of upload queue
+    DynamicJsonDocument doc(256);
+    doc["queueSize"] = uploadQueue.size();
+    doc["hasPending"] = uploadQueue.hasPending();
+
+    if (uploadQueue.hasPending()) {
+        UploadCommand next = uploadQueue.peek();
+        doc["nextFilename"] = next.filename;
+        doc["nextSize"] = next.data.length();
     }
-  }
+
+    String response;
+    serializeJson(doc, response);
+    server.send(200, "application/json", response);
+}
+
+// Process queued uploads - called from main loop only
+bool processQueuedUpload() {
+    // Check if there's a pending upload
+    if (!uploadQueue.hasPending()) {
+        return true;
+    }
+
+    // Get (but don't remove yet) the command
+    UploadCommand cmd = uploadQueue.peek();
+
+    Serial.printf("[Upload] Processing: %s (%d bytes)\n",
+                  cmd.filename.c_str(), cmd.data.length());
+
+    // Safe SD access - only called from loop()
+    try {
+        // Ensure directory exists
+        if (!SD.exists("/screens")) {
+            if (!SD.mkdir("/screens")) {
+                Serial.println("[Upload] ERROR: Failed to create /screens directory");
+                uploadQueue.dequeue();  // Remove failed command
+                return false;
+            }
+        }
+
+        // Write file
+        File file = SD.open("/screens/" + cmd.filename, FILE_WRITE);
+        if (!file) {
+            Serial.printf("[Upload] ERROR: Failed to open file for writing: %s\n",
+                         cmd.filename.c_str());
+            uploadQueue.dequeue();  // Remove failed command
+            return false;
+        }
+
+        size_t bytesWritten = file.print(cmd.data);
+        file.close();
+
+        if (bytesWritten == cmd.data.length()) {
+            Serial.printf("[Upload] SUCCESS: %s (%d bytes written)\n",
+                         cmd.filename.c_str(), bytesWritten);
+            uploadQueue.dequeue();  // Remove successful command
+            return true;
+        } else {
+            Serial.printf("[Upload] ERROR: Partial write - expected %d, got %d\n",
+                         cmd.data.length(), bytesWritten);
+            uploadQueue.dequeue();  // Remove failed command
+            return false;
+        }
+
+    } catch (const std::exception& e) {
+        Serial.printf("[Upload] EXCEPTION: %s\n", e.what());
+        uploadQueue.dequeue();  // Remove failed command
+        return false;
+    }
 }
 
 void handleGetJSON() {
@@ -1131,9 +1210,11 @@ void handleSaveJSON() {
   String filename = server.arg("filename");
   String content = server.arg("content");
 
+  xSemaphoreTake(sdMutex, portMAX_DELAY);
   File file = SD.open(filename, FILE_WRITE);
   yield();
   if (!file) {
+    xSemaphoreGive(sdMutex);
     server.send(500, "text/plain", "Failed to open file for writing");
     return;
   }
@@ -1142,6 +1223,7 @@ void handleSaveJSON() {
   yield();
   file.close();
   yield();
+  xSemaphoreGive(sdMutex);
 
   server.send(200, "text/plain", "File saved successfully");
 }
@@ -1172,6 +1254,7 @@ void setupWebServer() {
   server.on("/api/restart", HTTP_POST, handleAPIRestart);
   server.on("/api/wifi/connect", HTTP_POST, handleAPIWiFiConnect);
   server.on("/api/reload-screens", HTTP_POST, handleAPIReloadScreens);
+  server.on("/api/upload-status", HTTP_GET, handleUploadStatus);
   server.on("/upload", HTTP_GET, handleUpload);
   server.on("/upload-json", HTTP_POST, handleUploadJSON);
   server.on("/get-json", HTTP_GET, handleGetJSON);
