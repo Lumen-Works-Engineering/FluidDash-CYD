@@ -49,8 +49,7 @@ public:
 #endif
 
 #include <Preferences.h>
-#include <ESPAsyncWebServer.h>
-#include <ESPmDNS.h>
+#include <WebServer.h>
 #include <ESPmDNS.h>
 #include <SD.h>
 #include <SPI.h>
@@ -60,7 +59,7 @@ public:
 RTC_DS3231 rtc;
 WebSocketsClient webSocket;
 Preferences prefs;  // Needed for WiFi credentials storage
-AsyncWebServer server(80);
+WebServer server(80);
 WiFiManager wm;
 
 // Runtime variables
@@ -819,6 +818,9 @@ void setup() {
 }
 
 void loop() {
+  // Handle web server requests
+  server.handleClient();
+
   // Feed the watchdog timer at the start of each loop iteration
   feedLoopWDT();
 
@@ -886,300 +888,295 @@ void loop() {
 
 // ========== Web Server Setup ==========
 
-void setupWebServer() {
-  // Serve main configuration page
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getMainHTML());
-  });
-  
-  // User settings page
-  server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getSettingsHTML());
-  });
-  
-  // Admin/calibration page
-  server.on("/admin", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getAdminHTML());
-  });
+// Web server handler functions
+void handleRoot() {
+  server.send(200, "text/html", getMainHTML());
+}
 
-  // WiFi configuration page
-  server.on("/wifi", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getWiFiConfigHTML());
-  });
+void handleSettings() {
+  server.send(200, "text/html", getSettingsHTML());
+}
 
-  // API: Get current config as JSON
-  server.on("/api/config", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "application/json", getConfigJSON());
-  });
-  
-  // API: Get current status as JSON
-  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "application/json", getStatusJSON());
-  });
-  
-  // API: Save settings
-  server.on("/api/save", HTTP_POST, [](AsyncWebServerRequest *request){
-    // Update config from POST parameters
-    if (request->hasParam("temp_low", true)) {
-      cfg.temp_threshold_low = request->getParam("temp_low", true)->value().toFloat();
-    }
-    if (request->hasParam("temp_high", true)) {
-      cfg.temp_threshold_high = request->getParam("temp_high", true)->value().toFloat();
-    }
-    if (request->hasParam("fan_min", true)) {
-      cfg.fan_min_speed = request->getParam("fan_min", true)->value().toInt();
-    }
-    if (request->hasParam("graph_time", true)) {
-      uint16_t newTime = request->getParam("graph_time", true)->value().toInt();
-      if (newTime != cfg.graph_timespan_seconds) {
-        cfg.graph_timespan_seconds = newTime;
-        allocateHistoryBuffer(); // Reallocate with new size
-      }
-    }
-    if (request->hasParam("graph_interval", true)) {
-      cfg.graph_update_interval = request->getParam("graph_interval", true)->value().toInt();
-    }
-    if (request->hasParam("psu_low", true)) {
-      cfg.psu_alert_low = request->getParam("psu_low", true)->value().toFloat();
-    }
-    if (request->hasParam("psu_high", true)) {
-      cfg.psu_alert_high = request->getParam("psu_high", true)->value().toFloat();
-    }
-    if (request->hasParam("coord_decimals", true)) {
-      cfg.coord_decimal_places = request->getParam("coord_decimals", true)->value().toInt();
-    }
-    
-    saveConfig();
-    request->send(200, "text/plain", "Settings saved successfully");
-  });
-  
-  // API: Save admin/calibration settings
-  server.on("/api/admin/save", HTTP_POST, [](AsyncWebServerRequest *request){
-    if (request->hasParam("cal_x", true)) {
-      cfg.temp_offset_x = request->getParam("cal_x", true)->value().toFloat();
-    }
-    if (request->hasParam("cal_yl", true)) {
-      cfg.temp_offset_yl = request->getParam("cal_yl", true)->value().toFloat();
-    }
-    if (request->hasParam("cal_yr", true)) {
-      cfg.temp_offset_yr = request->getParam("cal_yr", true)->value().toFloat();
-    }
-    if (request->hasParam("cal_z", true)) {
-      cfg.temp_offset_z = request->getParam("cal_z", true)->value().toFloat();
-    }
-    if (request->hasParam("psu_cal", true)) {
-      cfg.psu_voltage_cal = request->getParam("psu_cal", true)->value().toFloat();
-    }
-    
-    saveConfig();
-    request->send(200, "text/plain", "Calibration saved successfully");
-  });
-  
-  // Reset WiFi settings
-  server.on("/api/reset-wifi", HTTP_POST, [](AsyncWebServerRequest *request){
-    request->send(200, "text/plain", "Resetting WiFi - device will restart");
-    delay(1000);
-    wm.resetSettings();
-    ESP.restart();
-  });
-  
-  // Restart device
-  server.on("/api/restart", HTTP_POST, [](AsyncWebServerRequest *request){
-    request->send(200, "text/plain", "Restarting...");
-    delay(1000);
-    ESP.restart();
-  });
+void handleAdmin() {
+  server.send(200, "text/html", getAdminHTML());
+}
 
-  // WiFi scanning removed - ESP32 cannot scan while in AP mode
-  // Users must manually enter SSID and password
+void handleWiFi() {
+  server.send(200, "text/html", getWiFiConfigHTML());
+}
 
-  // API: Connect to WiFi network
-  server.on("/api/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request){
-    String ssid = "";
-    String password = "";
+void handleAPIConfig() {
+  server.send(200, "application/json", getConfigJSON());
+}
 
-    if (request->hasParam("ssid", true)) {
-      ssid = request->getParam("ssid", true)->value();
+void handleAPIStatus() {
+  server.send(200, "application/json", getStatusJSON());
+}
+
+void handleAPISave() {
+  // Update config from POST parameters
+  if (server.hasArg("temp_low")) {
+    cfg.temp_threshold_low = server.arg("temp_low").toFloat();
+  }
+  if (server.hasArg("temp_high")) {
+    cfg.temp_threshold_high = server.arg("temp_high").toFloat();
+  }
+  if (server.hasArg("fan_min")) {
+    cfg.fan_min_speed = server.arg("fan_min").toInt();
+  }
+  if (server.hasArg("graph_time")) {
+    uint16_t newTime = server.arg("graph_time").toInt();
+    if (newTime != cfg.graph_timespan_seconds) {
+      cfg.graph_timespan_seconds = newTime;
+      allocateHistoryBuffer(); // Reallocate with new size
     }
-    if (request->hasParam("password", true)) {
-      password = request->getParam("password", true)->value();
-    }
+  }
+  if (server.hasArg("graph_interval")) {
+    cfg.graph_update_interval = server.arg("graph_interval").toInt();
+  }
+  if (server.hasArg("psu_low")) {
+    cfg.psu_alert_low = server.arg("psu_low").toFloat();
+  }
+  if (server.hasArg("psu_high")) {
+    cfg.psu_alert_high = server.arg("psu_high").toFloat();
+  }
+  if (server.hasArg("coord_decimals")) {
+    cfg.coord_decimal_places = server.arg("coord_decimals").toInt();
+  }
 
-    if (ssid.length() == 0) {
-      request->send(200, "application/json", "{\"success\":false,\"message\":\"SSID required\"}");
+  saveConfig();
+  server.send(200, "text/plain", "Settings saved successfully");
+}
+
+void handleAPIAdminSave() {
+  if (server.hasArg("cal_x")) {
+    cfg.temp_offset_x = server.arg("cal_x").toFloat();
+  }
+  if (server.hasArg("cal_yl")) {
+    cfg.temp_offset_yl = server.arg("cal_yl").toFloat();
+  }
+  if (server.hasArg("cal_yr")) {
+    cfg.temp_offset_yr = server.arg("cal_yr").toFloat();
+  }
+  if (server.hasArg("cal_z")) {
+    cfg.temp_offset_z = server.arg("cal_z").toFloat();
+  }
+  if (server.hasArg("psu_cal")) {
+    cfg.psu_voltage_cal = server.arg("psu_cal").toFloat();
+  }
+
+  saveConfig();
+  server.send(200, "text/plain", "Calibration saved successfully");
+}
+
+void handleAPIResetWiFi() {
+  wm.resetSettings();
+  server.send(200, "text/plain", "WiFi settings cleared. Device will restart...");
+  delay(1000);
+  ESP.restart();
+}
+
+void handleAPIRestart() {
+  server.send(200, "text/plain", "Restarting device...");
+  delay(1000);
+  ESP.restart();
+}
+
+void handleAPIWiFiConnect() {
+  String ssid = "";
+  String password = "";
+
+  if (server.hasArg("ssid")) {
+    ssid = server.arg("ssid");
+  }
+  if (server.hasArg("password")) {
+    password = server.arg("password");
+  }
+
+  if (ssid.length() == 0) {
+    server.send(200, "application/json", "{\"success\":false,\"message\":\"SSID required\"}");
+    return;
+  }
+
+  Serial.println("Attempting to connect to: " + ssid);
+
+  // Store credentials in preferences
+  prefs.begin("fluiddash", false);
+  prefs.putString("wifi_ssid", ssid);
+  prefs.putString("wifi_pass", password);
+  prefs.end();
+
+  // Send response and restart to apply credentials
+  server.send(200, "application/json", "{\"success\":true,\"message\":\"Credentials saved. Device will restart and attempt to connect.\"}");
+
+  Serial.println("WiFi credentials saved. Restarting...");
+  delay(2000);
+  ESP.restart();
+}
+
+void handleAPIReloadScreens() {
+  if (!sdCardAvailable) {
+    server.send(200, "application/json", "{\"success\":false,\"message\":\"SD card not available\"}");
+    return;
+  }
+
+  Serial.println("[JSON] Reloading screen layouts...");
+
+  int loaded = 0;
+  if (loadScreenConfig("/screens/monitor.json", monitorLayout)) loaded++;
+  yield();
+  if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) loaded++;
+  yield();
+  if (loadScreenConfig("/screens/graph.json", graphLayout)) loaded++;
+  yield();
+  if (loadScreenConfig("/screens/network.json", networkLayout)) loaded++;
+  yield();
+
+  // Redraw current screen
+  drawScreen();
+
+  char response[128];
+  sprintf(response, "{\"success\":true,\"message\":\"Reloaded %d layouts\"}", loaded);
+  server.send(200, "application/json", response);
+
+  Serial.printf("[JSON] Reloaded %d layouts\n", loaded);
+}
+
+void handleUpload() {
+  String html = "<!DOCTYPE html><html><head><title>Upload JSON</title>";
+  html += "<style>body{font-family:Arial;margin:20px;background:#1a1a1a;color:#fff}";
+  html += "h1{color:#00bfff}.box{background:#2a2a2a;padding:20px;border-radius:8px;max-width:600px}";
+  html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;cursor:pointer}";
+  html += "#status{margin-top:20px;padding:10px}.success{background:#004d00;color:#0f0}";
+  html += ".error{background:#4d0000;color:#f00}</style></head><body>";
+  html += "<h1>Upload JSON</h1><div class='box'><h3>Upload Screen Layout</h3>";
+  html += "<form id='f' enctype='multipart/form-data'>";
+  html += "<input type='file' id='file' accept='.json' required><br><br>";
+  html += "<button type='submit'>Upload</button></form>";
+  html += "<div id='status'></div></div>";
+  html += "<script>document.getElementById('f').addEventListener('submit',function(e){";
+  html += "e.preventDefault();let file=document.getElementById('file').files[0];";
+  html += "if(!file)return;let s=document.getElementById('status');";
+  html += "s.innerHTML='Uploading...';s.className='';let fd=new FormData();";
+  html += "fd.append('file',file);fetch('/upload-json',{method:'POST',body:fd})";
+  html += ".then(r=>r.json()).then(d=>{if(d.success){s.innerHTML='Uploaded!';";
+  html += "s.className='success';fetch('/api/reload-screens',{method:'POST'})}";
+  html += "else{s.innerHTML='Error';s.className='error'}})";
+  html += ".catch(e=>{s.innerHTML='Failed';s.className='error'})});</script>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleUploadJSON() {
+  HTTPUpload& upload = server.upload();
+  static File uploadFile;
+  static bool uploadError = false;
+
+  if (upload.status == UPLOAD_FILE_START) {
+    uploadError = false;
+    // Close any previously open file
+    if (uploadFile) uploadFile.close();
+    yield();
+
+    String filename = upload.filename;
+    if (!filename.endsWith(".json")) {
+      Serial.println("[Upload] Not a JSON file");
+      uploadError = true;
       return;
     }
 
-    Serial.println("Attempting to connect to: " + ssid);
-
-    // Store credentials in preferences
-    prefs.begin("fluiddash", false);
-    prefs.putString("wifi_ssid", ssid);
-    prefs.putString("wifi_pass", password);
-    prefs.end();
-
-    // Send response and restart to apply credentials
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Credentials saved. Device will restart and attempt to connect.\"}");
-
-    Serial.println("WiFi credentials saved. Restarting...");
-    delay(2000);
-    ESP.restart();
-  });
-
-  // API: Reload screen layouts from SD card
-  server.on("/api/reload-screens", HTTP_POST, [](AsyncWebServerRequest *request){
-      if (!sdCardAvailable) {
-          request->send(200, "application/json", "{\"success\":false,\"message\":\"SD card not available\"}");
-          return;
+    String path = "/screens/" + filename;
+    uploadFile = SD.open(path, FILE_WRITE);
+    yield();
+    if (!uploadFile) {
+      Serial.printf("[Upload] Cannot create %s\n", path.c_str());
+      uploadError = true;
+      return;
+    }
+    Serial.printf("[Upload] Starting: %s\n", filename.c_str());
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!uploadError && uploadFile && upload.currentSize) {
+      size_t written = uploadFile.write(upload.buf, upload.currentSize);
+      yield();
+      if (written != upload.currentSize) {
+        Serial.println("[Upload] Write error");
+        uploadError = true;
       }
-      
-      Serial.println("[JSON] Reloading screen layouts...");
-      
-      int loaded = 0;
-      if (loadScreenConfig("/screens/monitor.json", monitorLayout)) loaded++;
-      if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) loaded++;
-      if (loadScreenConfig("/screens/graph.json", graphLayout)) loaded++;
-      if (loadScreenConfig("/screens/network.json", networkLayout)) loaded++;
-      
-      // Redraw current screen
-      drawScreen();
-      
-      char response[128];
-      sprintf(response, "{\"success\":true,\"message\":\"Reloaded %d layouts\"}", loaded);
-      request->send(200, "application/json", response);
-      
-      Serial.printf("[JSON] Reloaded %d layouts\n", loaded);
-  });
-    // ========== WEB JSON UPLOAD & EDITOR ==========
-  
-  // Upload page
-  server.on("/upload", HTTP_GET, [](AsyncWebServerRequest *request){
-      String html = "<!DOCTYPE html><html><head><title>Upload JSON</title>";
-      html += "<style>body{font-family:Arial;margin:20px;background:#1a1a1a;color:#fff}";
-      html += "h1{color:#00bfff}.box{background:#2a2a2a;padding:20px;border-radius:8px;max-width:600px}";
-      html += "button{background:#00bfff;color:#000;padding:10px 20px;border:none;cursor:pointer}";
-      html += "#status{margin-top:20px;padding:10px}.success{background:#004d00;color:#0f0}";
-      html += ".error{background:#4d0000;color:#f00}</style></head><body>";
-      html += "<h1>Upload JSON</h1><div class='box'><h3>Upload Screen Layout</h3>";
-      html += "<form id='f' enctype='multipart/form-data'>";
-      html += "<input type='file' id='file' accept='.json' required><br><br>";
-      html += "<button type='submit'>Upload</button></form>";
-      html += "<div id='status'></div></div>";
-      html += "<script>document.getElementById('f').addEventListener('submit',function(e){";
-      html += "e.preventDefault();let file=document.getElementById('file').files[0];";
-      html += "if(!file)return;let s=document.getElementById('status');";
-      html += "s.innerHTML='Uploading...';s.className='';let fd=new FormData();";
-      html += "fd.append('file',file);fetch('/upload-json',{method:'POST',body:fd})";
-      html += ".then(r=>r.json()).then(d=>{if(d.success){s.innerHTML='Uploaded!';";
-      html += "s.className='success';fetch('/api/reload-screens',{method:'POST'})}";
-      html += "else{s.innerHTML='Error';s.className='error'}})";
-      html += ".catch(e=>{s.innerHTML='Failed';s.className='error'})});</script>";
-      html += "</body></html>";
-      request->send(200, "text/html", html);
-  });
-  
-  // Handle file upload (fixed memory management)
-  server.on("/upload-json", HTTP_POST,
-      [](AsyncWebServerRequest *request){
-          request->send(200, "application/json", "{\"success\":true}");
-      },
-      [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
-          static File uploadFile;
-          static bool uploadError = false;
-
-          if(index == 0){
-              uploadError = false;
-              // Close any previously open file
-              if(uploadFile) uploadFile.close();
-
-              if(!filename.endsWith(".json")){
-                  Serial.println("[Upload] Not a JSON file");
-                  uploadError = true;
-                  return;
-              }
-
-              String path = "/screens/" + filename;
-              uploadFile = SD.open(path, FILE_WRITE);
-              if(!uploadFile){
-                  Serial.printf("[Upload] Cannot create %s\n", path.c_str());
-                  uploadError = true;
-                  return;
-              }
-              Serial.printf("[Upload] Starting: %s\n", filename.c_str());
-          }
-
-          if(!uploadError && uploadFile && len){
-              size_t written = uploadFile.write(data, len);
-              if(written != len){
-                  Serial.println("[Upload] Write error");
-                  uploadError = true;
-              }
-          }
-
-          if(final){
-              if(uploadFile){
-                  uploadFile.close();
-                  if(!uploadError){
-                      Serial.printf("[Upload] Complete: %s\n", filename.c_str());
-                  }
-              }
-          }
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (uploadFile) {
+      uploadFile.close();
+      yield();
+      if (!uploadError) {
+        Serial.printf("[Upload] Complete: %s\n", upload.filename.c_str());
+        server.send(200, "application/json", "{\"success\":true}");
+      } else {
+        server.send(500, "application/json", "{\"success\":false}");
       }
-  );
-  
-  // Get JSON file - DISABLED (was causing crashes)
-  server.on("/get-json", HTTP_GET, [](AsyncWebServerRequest *request){
-      request->send(503, "application/json", "{\"success\":false,\"message\":\"Endpoint disabled - causing crashes\"}");
-  });
-  
-  // Save JSON file - DISABLED (use /upload instead)
-  // This endpoint was causing memory issues and crashes
-  // Use the /upload page for file uploads instead
-  /*
-  server.on("/save-json", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-          static String jsonData;
-          if(index == 0) jsonData = "";
-          for(size_t i = 0; i < len; i++) jsonData += (char)data[i];
-          if(index + len == total){
-              JsonDocument doc;
-              if(deserializeJson(doc, jsonData)){
-                  request->send(400, "application/json", "{\"success\":false}");
-                  return;
-              }
-              String filename = doc["filename"];
-              String content = doc["content"];
-              String path = "/screens/" + filename;
-              File file = SD.open(path, FILE_WRITE);
-              if(!file){
-                  request->send(500, "application/json", "{\"success\":false}");
-                  return;
-              }
-              file.print(content);
-              file.close();
-              Serial.printf("[Editor] Saved: %s\n", path.c_str());
-              request->send(200, "application/json", "{\"success\":true}");
-          }
-      }
-  );
-  */
-  
-  // Editor page - DISABLED (was causing crashes)
-  // Use /upload page for file uploads instead
-  // Editor functionality can be added back later with better memory management
-  server.on("/editor", HTTP_GET, [](AsyncWebServerRequest *request){
-      String html = "<!DOCTYPE html><html><head><title>Editor Disabled</title>";
-      html += "<style>body{font-family:Arial;margin:50px;background:#1a1a1a;color:#fff;text-align:center}";
-      html += "h1{color:#ff6600}a{color:#00bfff;text-decoration:none}</style></head><body>";
-      html += "<h1>JSON Editor Temporarily Disabled</h1>";
-      html += "<p>The live editor was causing memory issues and crashes.</p>";
-      html += "<p>Please use the <a href='/upload'>Upload Page</a> to upload JSON files instead.</p>";
-      html += "<p><a href='/'>Back to Dashboard</a></p>";
-      html += "</body></html>";
-      request->send(200, "text/html", html);
-  });
-  
-  // ========== END WEB JSON UPLOAD & EDITOR ==========
+    }
+  }
+}
+
+void handleGetJSON() {
+  // DISABLED - was causing crashes with SD card access
+  server.send(503, "application/json", "{\"success\":false,\"message\":\"Endpoint disabled - causing crashes\"}");
+}
+
+void handleSaveJSON() {
+  if (!server.hasArg("filename") || !server.hasArg("content")) {
+    server.send(400, "text/plain", "Missing filename or content");
+    return;
+  }
+
+  String filename = server.arg("filename");
+  String content = server.arg("content");
+
+  File file = SD.open(filename, FILE_WRITE);
+  yield();
+  if (!file) {
+    server.send(500, "text/plain", "Failed to open file for writing");
+    return;
+  }
+
+  file.print(content);
+  yield();
+  file.close();
+  yield();
+
+  server.send(200, "text/plain", "File saved successfully");
+}
+
+void handleEditor() {
+  String html = "<!DOCTYPE html><html><head><title>Editor Disabled</title>";
+  html += "<style>body{font-family:Arial;margin:50px;background:#1a1a1a;color:#fff;text-align:center}";
+  html += "h1{color:#ff6600}a{color:#00bfff;text-decoration:none}</style></head><body>";
+  html += "<h1>JSON Editor Temporarily Disabled</h1>";
+  html += "<p>The live editor was causing memory issues and crashes.</p>";
+  html += "<p>Please use the <a href='/upload'>Upload Page</a> to upload JSON files instead.</p>";
+  html += "<p><a href='/'>Back to Dashboard</a></p>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void setupWebServer() {
+  // Register all handlers
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/settings", HTTP_GET, handleSettings);
+  server.on("/admin", HTTP_GET, handleAdmin);
+  server.on("/wifi", HTTP_GET, handleWiFi);
+  server.on("/api/config", HTTP_GET, handleAPIConfig);
+  server.on("/api/status", HTTP_GET, handleAPIStatus);
+  server.on("/api/save", HTTP_POST, handleAPISave);
+  server.on("/api/admin/save", HTTP_POST, handleAPIAdminSave);
+  server.on("/api/reset-wifi", HTTP_POST, handleAPIResetWiFi);
+  server.on("/api/restart", HTTP_POST, handleAPIRestart);
+  server.on("/api/wifi/connect", HTTP_POST, handleAPIWiFiConnect);
+  server.on("/api/reload-screens", HTTP_POST, handleAPIReloadScreens);
+  server.on("/upload", HTTP_GET, handleUpload);
+  server.on("/upload-json", HTTP_POST, handleUploadJSON);
+  server.on("/get-json", HTTP_GET, handleGetJSON);
+  server.on("/save-json", HTTP_POST, handleSaveJSON);
+  server.on("/editor", HTTP_GET, handleEditor);
 
   server.begin();
   Serial.println("Web server started");
