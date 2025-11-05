@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <SD.h>
 #include <ArduinoJson.h>
+#include "../webserver/sd_mutex.h"
 
 // External variables from main.cpp (needed for data access)
 extern bool sdCardAvailable;
@@ -75,9 +76,16 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
 
     Serial.printf("[JSON] Loading screen config: %s\n", filename);
 
+    // Acquire SD card mutex
+    if (!SD_MUTEX_LOCK()) {
+        Serial.println("[JSON] Failed to lock SD mutex for screen config");
+        return false;
+    }
+
     // Open file
     File file = SD.open(filename, FILE_READ);
     if (!file) {
+        SD_MUTEX_UNLOCK();
         Serial.printf("[JSON] Failed to open %s\n", filename);
         return false;
     }
@@ -87,6 +95,7 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     if (fileSize > 8192) {
         Serial.printf("[JSON] File too large: %d bytes (max 8192)\n", fileSize);
         file.close();
+        SD_MUTEX_UNLOCK();
         return false;
     }
 
@@ -95,6 +104,7 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     if (!jsonBuffer) {
         Serial.println("[JSON] Failed to allocate memory");
         file.close();
+        SD_MUTEX_UNLOCK();
         return false;
     }
 
@@ -102,6 +112,9 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     size_t bytesRead = file.readBytes(jsonBuffer, fileSize);
     jsonBuffer[bytesRead] = '\0';
     file.close();
+
+    // Release SD card mutex - file is closed, data is in memory
+    SD_MUTEX_UNLOCK();
 
     // Parse JSON
     JsonDocument doc;

@@ -55,6 +55,7 @@ public:
 #include <ArduinoJson.h>
 // #include <ESP32FtpServer.h>  // Temporarily disabled - SD_MMC library conflict
 #include "webserver/webserver_manager.h"
+#include "webserver/sd_mutex.h"
 
 // Display instance is now in display.cpp (extern declaration in display.h)
 RTC_DS3231 rtc;
@@ -693,11 +694,14 @@ void setup() {
     // ========== ADD SD CARD TEST HERE ==========
     feedLoopWDT();
     Serial.println("\n=== Testing SD Card ===");
-    
+
+    // Initialize SD mutex before any SD operations
+    initSDMutex();
+
     // Initialize SD card on VSPI bus
     SPIClass spiSD(VSPI);
     spiSD.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-    
+
     if (SD.begin(SD_CS, spiSD)) {
         sdCardAvailable = true;
         Serial.println("SUCCESS: SD card initialized!");
@@ -826,8 +830,7 @@ void loop() {
   // Feed the watchdog timer at the start of each loop iteration
   feedLoopWDT();
 
-  // Handle WebServer (synchronous, safe)
-  webServer.handleClient();
+  // AsyncWebServer runs in background - no handleClient() needed
 
   // FTP server temporarily disabled
 

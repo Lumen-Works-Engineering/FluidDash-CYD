@@ -3,22 +3,21 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WebServer.h>
+#include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <SD.h>
 #include <FS.h>
 
 class WebServerManager {
 private:
-    WebServer* server;
+    AsyncWebServer* server;
     static const int SERVER_PORT = 80;
-    void listDirRecursiveStreaming(File dir, String prefix, bool& first, int depth);
+    void listDirRecursive(File dir, String prefix, JsonArray& files, int depth);
 
 public:
     WebServerManager();
     ~WebServerManager();
     void begin();
-    void handleClient();
     void stop();
     void setupScreenRoutes();
     void setupFileRoutes();

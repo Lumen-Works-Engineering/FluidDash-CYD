@@ -17,7 +17,10 @@
       "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run --target compile)",
       "Bash(dir:*)",
       "Bash(findstr:*)",
-      "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run --target clean)"
+      "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" run --target clean)",
+      "Bash(del \"c:\\Users\\john_sparks\\Documents\\PlatformIO\\Projects\\FluidDash-CYD\\src\\webserver\\webserver_manager.cpp\")",
+      "Bash(\"C:\\Users\\john_sparks\\.platformio\\penv\\Scripts\\pio.exe\" pkg install --library \"me-no-dev/ESPAsyncWebServer\")",
+      "Bash(timeout /t 5)"
     ],
     "deny": [],
     "ask": []
