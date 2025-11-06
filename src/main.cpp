@@ -16,6 +16,7 @@
 #include "sensors/sensors.h"
 #include "network/network.h"
 #include "utils/utils.h"
+#include "web/web_server.h"
 #include <LovyanGFX.hpp>
 #include <Wire.h>
 #include <RTClib.h>
@@ -1302,6 +1303,9 @@ void handleEditor() {
   server.send(200, "text/html", html);
 }
 
+// NOTE: setupWebServer() implementation has been moved to web/web_server.cpp
+// to avoid duplicate definition linker error.
+/* MOVED TO web/web_server.cpp to resolve duplicate definition
 void setupWebServer() {
   // Register all handlers
   server.on("/", HTTP_GET, handleRoot);
@@ -1336,6 +1340,7 @@ void setupWebServer() {
   server.begin();
   Serial.println("Web server started");
 }
+*/
 
 // ========== HTML Pages ==========
 // NOTE: These functions return large String objects which can cause heap fragmentation.

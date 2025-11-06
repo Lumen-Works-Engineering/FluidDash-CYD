@@ -2,6 +2,7 @@
 #define SYSTEM_STATE_H
 
 #include <Arduino.h>
+#include "../config/config.h"
 
 /**
  * @brief System state management class
