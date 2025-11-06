@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>FluidDash</title>
+  <style>
+    body { font-family: Arial; margin: 20px; background: #1a1a1a; color: #fff; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #00bfff; }
+    .card { background: #2a2a2a; padding: 20px; margin: 15px 0; border-radius: 8px; }
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .status-item { padding: 10px; background: #333; border-radius: 5px; }
+    .status-label { color: #888; font-size: 12px; }
+    .status-value { font-size: 24px; font-weight: bold; color: #00bfff; }
+    .temp-ok { color: #00ff00; }
+    .temp-warn { color: #ffaa00; }
+    .temp-hot { color: #ff0000; }
+    button { background: #00bfff; color: #fff; border: none; padding: 12px 24px;
+             border-radius: 5px; cursor: pointer; font-size: 16px; margin: 5px; }
+    button:hover { background: #0099cc; }
+    .link-button { display: inline-block; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>🛡️ FluidDash</h1>
+
+    <div class='card'>
+      <h2>System Status</h2>
+      <div class='status-grid' id='status'>
+        <div class='status-item'>
+          <div class='status-label'>CNC Status</div>
+          <div class='status-value' id='cnc_status'>Loading...</div>
+        </div>
+        <div class='status-item'>
+          <div class='status-label'>Max Temperature</div>
+          <div class='status-value' id='max_temp'>--°C</div>
+        </div>
+        <div class='status-item'>
+          <div class='status-label'>Fan Speed</div>
+          <div class='status-value' id='fan_speed'>--%</div>
+        </div>
+        <div class='status-item'>
+          <div class='status-label'>PSU Voltage</div>
+          <div class='status-value' id='psu_volt'>--V</div>
+        </div>
+      </div>
+    </div>
+
+    <div class='card'>
+      <h2>Configuration</h2>
+      <a href='/settings' class='link-button'><button>⚙️ User Settings</button></a>
+      <a href='/admin' class='link-button'><button>🔧 Admin/Calibration</button></a>
+      <a href='/wifi' class='link-button'><button>📡 WiFi Setup</button></a>
+      <button onclick='restart()'>🔄 Restart Device</button>
+    </div>
+
+    <div class='card'>
+      <h2>Information</h2>
+      <p><strong>Device Name:</strong> %DEVICE_NAME%.local</p>
+      <p><strong>IP Address:</strong> %IP_ADDRESS%</p>
+      <p><strong>FluidNC:</strong> %FLUIDNC_IP%</p>
+      <p><strong>Version:</strong> v0.7</p>
+    </div>
+  </div>
+
+  <script>
+    function updateStatus() {
+      fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById('cnc_status').textContent = data.machine_state;
+
+          let maxTemp = Math.max(...data.temperatures);
+          let tempEl = document.getElementById('max_temp');
+          tempEl.textContent = maxTemp.toFixed(1) + '°C';
+          tempEl.className = 'status-value ' +
+            (maxTemp > 50 ? 'temp-hot' : maxTemp > 35 ? 'temp-warn' : 'temp-ok');
+
+          document.getElementById('fan_speed').textContent = data.fan_speed + '%';
+          document.getElementById('psu_volt').textContent = data.psu_voltage.toFixed(1) + 'V';
+        });
+    }
+
+    function restart() {
+      if (confirm('Restart device?')) {
+        fetch('/api/restart', {method: 'POST'})
+          .then(() => alert('Restarting... Reconnect in 30 seconds'));
+      }
+    }
+
+    function resetWiFi() {
+      if (confirm('Reset WiFi settings? Device will restart in AP mode.')) {
+        fetch('/api/reset-wifi', {method: 'POST'})
+          .then(() => alert('WiFi reset. Connect to FluidDash-Setup network.'));
+      }
+    }
+
+    updateStatus();
+    setInterval(updateStatus, 2000);
+  </script>
+</body>
+</html>
