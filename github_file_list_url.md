@@ -1,28 +1,67 @@
-# FluidDash-CYD Repository Files and Folders
+# FluidDash-CYD Code Files
 
-This file contains a list of all top-level folders and files in the FluidDash-CYD repository.
+This document contains a complete list of all .h, .cpp, and .json files in the FluidDash-CYD repository (excluding the lib folder) with their raw GitHub URLs.
 
-## Folders
+## JSON Files
 
-- `.claude` - Claude AI configuration folder
-- `.vscode` - Visual Studio Code configuration folder
-- `include` - Header files directory
-- `lib` - Library files directory
-- `screens` - Screen configuration files
-- `scrnEditor` - Screen editor files
-- `src` - Source code directory
-- `test` - Test files directory
+### .claude/
+- [settings.local.json](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/.claude/settings.local.json)
 
-## Files
+### .vscode/
+- [extensions.json](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/.vscode/extensions.json)
 
-- `.gitignore` - Git ignore configuration
-- `ASYNCWEBSERVER_CRITICAL_ISSUES.md` - Documentation for AsyncWebServer critical issues
-- `ASYNCWEBSERVER_MUTEX_FIX.md` - Documentation for AsyncWebServer mutex fix
-- `ASYNCWEBSERVER_MUTEX_FIX_V2.md` - Documentation for AsyncWebServer mutex fix version 2
-- `DS18B20_PHASE1_IMPLEMENTATION.md` - DS18B20 sensor implementation documentation
-- `DYNAMIC_DATA_VARIABLES_AND_API_REFERENCE.md` - Dynamic data variables and API reference
-- `FluidDash-CYD.code-workspace` - VS Code workspace configuration
-- `FluidDash_CYD_Wiring_guide.md` - Hardware wiring guide
-- `SENSOR_MANAGEMENT_IMPLEMENTATION.md` - Sensor management implementation documentation
-- `github_file_list_url.md` - This file
-- `platformio.ini` - PlatformIO configuration file
+### screens/
+- [monitor.json](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/screens/monitor.json)
+- [monitor_v01.json](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/screens/monitor_v01.json)
+- [monitor_v02.json](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/screens/monitor_v02.json)
+- [monitor_v03.json](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/screens/monitor_v03.json)
+
+## Header Files (.h)
+
+### src/config/
+- [config.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/config/config.h)
+- [pins.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/config/pins.h)
+
+### src/display/
+- [display.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/display/display.h)
+- [screen_renderer.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/display/screen_renderer.h)
+- [ui_modes.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/display/ui_modes.h)
+
+### src/network/
+- [network.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/network/network.h)
+
+### src/sensors/
+- [sensors.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/sensors/sensors.h)
+
+### src/utils/
+- [utils.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/utils/utils.h)
+
+### src/webserver/
+- [sd_mutex.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/webserver/sd_mutex.h)
+- [webserver_manager.h](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/webserver/webserver_manager.h)
+
+## Source Files (.cpp)
+
+### src/
+- [main.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/main.cpp)
+
+### src/config/
+- [config.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/config/config.cpp)
+
+### src/display/
+- [display.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/display/display.cpp)
+- [screen_renderer.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/display/screen_renderer.cpp)
+- [ui_modes.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/display/ui_modes.cpp)
+
+### src/network/
+- [network.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/network/network.cpp)
+
+### src/sensors/
+- [sensors.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/sensors/sensors.cpp)
+
+### src/utils/
+- [utils.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/utils/utils.cpp)
+
+### src/webserver/
+- [sd_mutex.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/webserver/sd_mutex.cpp)
+- [webserver_manager.cpp](https://raw.githubusercontent.com/Lumen-Works-Engineering/FluidDash-CYD/main/src/webserver/webserver_manager.cpp)
