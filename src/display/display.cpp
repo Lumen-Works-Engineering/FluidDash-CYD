@@ -1,6 +1,13 @@
 #include "display.h"
 #include "config/config.h"
 
+#ifndef COLOR_BACKGROUND
+#define COLOR_BACKGROUND 0x00008B
+#endif
+#ifndef COLOR_HEADER
+#define COLOR_HEADER 0xFFFFFF
+#endif
+
 // Define the global display instance
 LGFX gfx;
 
@@ -60,13 +67,14 @@ LGFX::LGFX(void)
 }
 
 void showSplashScreen() {
+  gfx.setBaseColor(COLOR_BACKGROUND);
   gfx.setTextColor(COLOR_HEADER);
   gfx.setTextSize(3);
   gfx.setCursor(80, 120);
   gfx.println("FluidDash");
   gfx.setTextSize(2);
   gfx.setCursor(140, 160);
-  gfx.println("v0.7");
+  gfx.println("v0.9");
   gfx.setCursor(160, 190);
   gfx.println("Initializing...");
 }
