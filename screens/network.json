@@ -1,0 +1,225 @@
+{
+  "name": "Network Status",
+  "background": "0000",
+  "elements": [
+    {
+      "type": "rect",
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 32,
+      "color": "17BF",
+      "filled": true
+    },
+    {
+      "type": "text",
+      "x": 120,
+      "y": 2,
+      "size": 3,
+      "color": "FFFF",
+      "label": "NETWORK STATUS"
+    },
+    {
+      "type": "line",
+      "x": 0,
+      "y": 32,
+      "w": 480,
+      "h": 1,
+      "color": "4A49"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 50,
+      "size": 2,
+      "color": "95BF",
+      "label": "Device Name:"
+    },
+    {
+      "type": "dynamic",
+      "x": 200,
+      "y": 48,
+      "w": 270,
+      "h": 25,
+      "size": 2,
+      "color": "07FF",
+      "bgColor": "0000",
+      "label": "",
+      "data": "deviceName",
+      "showLabel": false,
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 85,
+      "size": 2,
+      "color": "95BF",
+      "label": "WiFi SSID:"
+    },
+    {
+      "type": "dynamic",
+      "x": 200,
+      "y": 83,
+      "w": 270,
+      "h": 25,
+      "size": 2,
+      "color": "07FF",
+      "bgColor": "0000",
+      "label": "",
+      "data": "ssid",
+      "showLabel": false,
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 120,
+      "size": 2,
+      "color": "95BF",
+      "label": "IP Address:"
+    },
+    {
+      "type": "dynamic",
+      "x": 200,
+      "y": 118,
+      "w": 270,
+      "h": 25,
+      "size": 2,
+      "color": "07E0",
+      "bgColor": "0000",
+      "label": "",
+      "data": "ipAddress",
+      "showLabel": false,
+      "align": "left"
+    },
+    {
+      "type": "line",
+      "x": 0,
+      "y": 160,
+      "w": 480,
+      "h": 1,
+      "color": "4A49"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 175,
+      "size": 2,
+      "color": "95BF",
+      "label": "FluidNC IP:"
+    },
+    {
+      "type": "dynamic",
+      "x": 200,
+      "y": 173,
+      "w": 270,
+      "h": 25,
+      "size": 2,
+      "color": "FFAA",
+      "bgColor": "0000",
+      "label": "",
+      "data": "fluidncIP",
+      "showLabel": false,
+      "align": "left"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 210,
+      "size": 2,
+      "color": "95BF",
+      "label": "Machine State:"
+    },
+    {
+      "type": "status",
+      "x": 200,
+      "y": 208,
+      "w": 270,
+      "h": 25,
+      "size": 2,
+      "color": "07FF",
+      "bgColor": "0000",
+      "label": "",
+      "data": "machineState",
+      "showLabel": false,
+      "align": "left"
+    },
+    {
+      "type": "line",
+      "x": 0,
+      "y": 250,
+      "w": 480,
+      "h": 1,
+      "color": "4A49"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 265,
+      "size": 1,
+      "color": "4A49",
+      "label": "System Temperatures:"
+    },
+    {
+      "type": "temp",
+      "x": 10,
+      "y": 285,
+      "w": 110,
+      "h": 20,
+      "size": 1,
+      "color": "FF88",
+      "bgColor": "0000",
+      "label": "X: ",
+      "data": "temp0",
+      "decimals": 1,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "temp",
+      "x": 130,
+      "y": 285,
+      "w": 110,
+      "h": 20,
+      "size": 1,
+      "color": "FF88",
+      "bgColor": "0000",
+      "label": "YL: ",
+      "data": "temp1",
+      "decimals": 1,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "temp",
+      "x": 250,
+      "y": 285,
+      "w": 110,
+      "h": 20,
+      "size": 1,
+      "color": "FF88",
+      "bgColor": "0000",
+      "label": "YR: ",
+      "data": "temp2",
+      "decimals": 1,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "temp",
+      "x": 370,
+      "y": 285,
+      "w": 110,
+      "h": 20,
+      "size": 1,
+      "color": "FF88",
+      "bgColor": "0000",
+      "label": "Z: ",
+      "data": "temp3",
+      "decimals": 1,
+      "showLabel": true,
+      "align": "left"
+    }
+  ]
+}

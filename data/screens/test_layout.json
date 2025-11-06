@@ -1,0 +1,12 @@
+{
+  "screens": [
+    {
+      "type": "text",
+      "text": "Phase 2 Test",
+      "x": 100,
+      "y": 100,
+      "font": "FreeSans12pt7b",
+      "color": "white"
+    }
+  ]
+}

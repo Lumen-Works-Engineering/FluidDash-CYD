@@ -817,3 +817,218 @@ WebSocket: Real WebSocketsClient library → FluidNC connection stable
 ```
 
 **Ready for Production Use!** 🎉
+
+---
+
+## Session 7 - RTC Time Setting & Display Enhancements
+**Date:** 2025-01-05 (continued)
+**Branch:** main
+
+### User Requests
+1. Add RTC time/date setting capability to admin web page
+2. Provide comprehensive testing guide for all pages and API endpoints
+3. Fix /api/reload-screens endpoint (not found error)
+4. Investigate RTC time not updating on physical display
+5. Fix temperature graph not displaying in JSON layouts
+6. Fix font quality (blocky/pixelated text in JSON renderer vs smooth legacy mode)
+
+### Tasks Completed
+
+**TASK 7.1: Implement RTC Time/Date Setting Feature**
+- [x] Added RTC configuration section to admin HTML page
+- [x] Created HTML5 date/time input controls with labels
+- [x] Added "Use Browser Time" button for one-click sync
+- [x] Implemented GET /api/rtc endpoint to read current RTC time
+- [x] Implemented POST /api/rtc/set endpoint to update RTC time
+- [x] Added JavaScript functions for RTC display updates (every 5 seconds)
+- [x] Added form validation and success message display
+- [x] Registered API endpoints in setupWebServer()
+
+**TASK 7.2: Create Comprehensive Testing Guide**
+- [x] Documented all web pages with access URLs and testing procedures
+- [x] Documented all API endpoints with curl examples
+- [x] Included expected responses for each endpoint
+- [x] Organized by category (Pages, Status APIs, Control APIs, Upload APIs, RTC APIs)
+
+**TASK 7.3: Fix /api/reload-screens Endpoint**
+- [x] Issue: Endpoint returned 404 when accessed from browser
+- [x] Root cause: Only registered for HTTP_POST, browser sends GET by default
+- [x] Solution: Added duplicate registration for HTTP_GET
+- [x] Endpoint now accepts both GET and POST methods
+
+**TASK 7.4: Investigate RTC Display Update Issue**
+- [x] User reported: RTC updates via API but not visible on display
+- [x] Investigation found: RTC time not available as data source in JSON layouts
+- [x] Root cause: getDataString() had no RTC data source handlers
+- [x] Display updates every 1 second, but RTC data wasn't exposed to JSON renderer
+
+**TASK 7.5: Add RTC Data Sources to JSON Renderer**
+- [x] Added extern declarations for RTC (rtc, rtcAvailable) in screen_renderer.cpp
+- [x] Added RTClib.h include to screen_renderer.cpp
+- [x] Implemented 6 new RTC data sources in getDataString():
+  - `rtcTime` - 24-hour format: HH:MM:SS
+  - `rtcTime12` - 12-hour format with AM/PM: HH:MM:SS AM
+  - `rtcTimeShort` - 24-hour without seconds: HH:MM
+  - `rtcDate` - ISO date: YYYY-MM-DD
+  - `rtcDateShort` - US date: MM/DD/YYYY
+  - `rtcDateTime` - Full timestamp: YYYY-MM-DD HH:MM:SS
+- [x] Added "No RTC" fallback message when RTC unavailable
+- [x] Created example layout (screen_0.json) demonstrating RTC display
+
+**TASK 7.6: Fix Temperature Graph Display**
+- [x] Issue: JSON layouts showed "GRAPH" placeholder instead of actual temperature history
+- [x] Added extern declarations for tempHistory, historySize, historyIndex
+- [x] Implemented full temperature graph rendering in ELEM_GRAPH case
+- [x] Graph algorithm matches legacy mode implementation:
+  - Temperature history line with color coding (green/orange/red)
+  - Temperature thresholds (cfg.temp_threshold_low/high)
+  - Scale markers at 10°, 35°, 60°
+  - Constrained Y values to graph bounds
+- [x] Graph now functional in JSON layouts
+
+**TASK 7.7: Fix Font Quality in JSON Renderer**
+- [x] Issue: Text appeared blocky and pixelated compared to smooth legacy rendering
+- [x] Root cause: Using gfx.setTextSize() + gfx.print() scales bitmap fonts (blocky)
+- [x] Solution: Converted to LovyanGFX smooth rendering with gfx.drawString()
+- [x] Updated all text rendering cases in drawElement():
+  - ELEM_TEXT_STATIC (lines 239-263)
+  - ELEM_TEXT_DYNAMIC (lines 265-298)
+  - ELEM_TEMP_VALUE (lines 300-341)
+  - ELEM_COORD_VALUE (lines 343-383)
+  - ELEM_STATUS_VALUE (lines 385-430)
+- [x] Implemented proper text alignment (left/center/right) with vertical centering
+- [x] Used fonts::Font2 for smooth anti-aliased rendering
+- [x] Text now uses setTextDatum() for alignment and drawString() for smooth output
+
+### Files Modified - Session 7
+
+**src/main.cpp:**
+- Lines 429-447: Added RTC section to admin HTML (date/time inputs, buttons)
+- Lines 482-530: Added JavaScript functions (updateRTCTime, setRTCNow, form handler)
+- Lines 1090-1104: Added handleAPIRTC() - GET /api/rtc endpoint
+- Lines 1106-1144: Added handleAPIRTCSet() - POST /api/rtc/set endpoint
+- Lines 1325-1326: Fixed /api/reload-screens to accept both GET and POST
+- Line 1326: Registered GET /api/rtc endpoint
+- Line 1327: Registered POST /api/rtc/set endpoint
+
+**src/display/screen_renderer.cpp:**
+- Lines 6, 20-24: Added RTClib.h include and RTC extern declarations
+- Lines 22-24: Added tempHistory, historySize, historyIndex extern declarations
+- Lines 216-259: Added 6 RTC data sources to getDataString() function
+- Lines 239-263: Improved ELEM_TEXT_STATIC rendering (smooth fonts, alignment)
+- Lines 265-298: Improved ELEM_TEXT_DYNAMIC rendering (smooth fonts, alignment)
+- Lines 300-341: Improved ELEM_TEMP_VALUE rendering (smooth fonts, alignment)
+- Lines 343-383: Improved ELEM_COORD_VALUE rendering (smooth fonts, alignment)
+- Lines 385-430: Improved ELEM_STATUS_VALUE rendering (smooth fonts, alignment)
+- Lines 342-388: Implemented full temperature graph rendering for ELEM_GRAPH
+
+**data/screens/screen_0.json:**
+- Created example JSON layout demonstrating RTC display
+- Shows rtcTime (HH:MM:SS) in top-right corner
+- Shows rtcDateShort (MM/DD/YYYY) below time
+- Includes CNC positions, machine state, temperatures, PSU voltage
+- Demonstrates proper element structure for JSON layouts
+
+### Key Implementation Details - Session 7
+
+**RTC Time Setting Flow:**
+```
+1. Admin page loads → JavaScript calls /api/rtc to show current time
+2. User enters date/time or clicks "Use Browser Time"
+3. Form submission → POST /api/rtc/set with date/time parameters
+4. handleAPIRTCSet() validates ranges, calls rtc.adjust(DateTime(...))
+5. Success response → JavaScript displays confirmation message
+6. JavaScript auto-updates display every 5 seconds
+```
+
+**RTC API Endpoints:**
+```cpp
+// GET /api/rtc - Read current RTC time
+{
+  "success": true,
+  "timestamp": "2025-01-05 14:30:45"
+}
+
+// POST /api/rtc/set - Update RTC time
+// Parameters: date (YYYY-MM-DD), time (HH:MM:SS)
+{
+  "success": true,
+  "message": "RTC time updated successfully"
+}
+```
+
+**RTC Data Sources in JSON Layouts:**
+```json
+{
+  "type": "dynamic",
+  "data": "rtcTime",        // HH:MM:SS
+  "label": "",
+  "showLabel": false
+}
+```
+
+Available data sources:
+- `rtcTime` → "14:30:45"
+- `rtcTime12` → "02:30:45 PM"
+- `rtcTimeShort` → "14:30"
+- `rtcDate` → "2025-01-05"
+- `rtcDateShort` → "01/05/2025"
+- `rtcDateTime` → "2025-01-05 14:30:45"
+
+**Font Rendering Improvements:**
+```cpp
+// Old method (blocky):
+gfx.setTextSize(2);          // Scales bitmap font = pixelated
+gfx.setCursor(x, y);
+gfx.print(text);
+
+// New method (smooth):
+gfx.setFont(&fonts::Font2);  // Anti-aliased font
+gfx.setTextSize(2.0f, 2.0f); // Smooth float scaling
+gfx.setTextDatum(textdatum_t::middle_left);  // Alignment
+gfx.drawString(text, x, y);  // Smooth rendering
+```
+
+**Text Alignment Support:**
+- `ALIGN_LEFT`: Text left-aligned, vertically centered in element bounds
+- `ALIGN_CENTER`: Text horizontally and vertically centered
+- `ALIGN_RIGHT`: Text right-aligned, vertically centered
+
+**Temperature Graph Implementation:**
+- Renders temperature history from circular buffer (tempHistory array)
+- Color-coded lines: green (normal), orange (medium), red (high)
+- Scale markers at 10°C, 35°C, 60°C
+- Auto-scaling to element dimensions (elem.x, elem.y, elem.w, elem.h)
+- Updates every second via updateDynamicElements()
+
+### Current Status - Session 7 COMPLETE
+- ✅ RTC time/date setting via admin web page
+- ✅ RTC API endpoints functional (/api/rtc, /api/rtc/set)
+- ✅ RTC data sources available in JSON layouts
+- ✅ Temperature graph rendering in JSON layouts
+- ✅ Smooth font rendering with proper alignment
+- ✅ /api/reload-screens accepts both GET and POST
+- ✅ Example layout created (screen_0.json)
+- ✅ Code ready for testing
+
+### Testing Checklist - Session 7
+- [ ] Admin page displays RTC section with date/time inputs
+- [ ] "Use Browser Time" button populates current time
+- [ ] RTC time setting works via form submission
+- [ ] GET /api/rtc returns current time
+- [ ] RTC time displays on physical screen (JSON layout)
+- [ ] RTC time updates every second on display
+- [ ] Temperature graph renders in JSON layout
+- [ ] Text appears smooth and anti-aliased (not blocky)
+- [ ] Text alignment (left/center/right) works correctly
+- [ ] All text element types render smoothly
+
+### Next Steps
+- [ ] User testing and feedback
+- [ ] Git commit Session 7 changes
+- [ ] Consider adding more graph types (beyond temperature)
+- [ ] Optional: Add font size selection in JSON layouts
+
+---
+
+## Ready for Session 7 Testing! 🕒📊

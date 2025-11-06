@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <SD.h>
 #include <ArduinoJson.h>
+#include <RTClib.h>
 #include "../storage_manager.h"
 
 // External variables from main.cpp (needed for data access)
@@ -16,6 +17,11 @@ extern int spindleRPM;
 extern float psuVoltage;
 extern uint8_t fanSpeed;
 extern String machineState;
+extern RTC_DS3231 rtc;
+extern bool rtcAvailable;
+extern float *tempHistory;
+extern uint16_t historySize;
+extern uint16_t historyIndex;
 
 // ========== JSON PARSING FUNCTIONS ==========
 
@@ -208,6 +214,53 @@ String getDataString(const char* dataSource) {
     if (strcmp(dataSource, "deviceName") == 0) return String(cfg.device_name);
     if (strcmp(dataSource, "fluidncIP") == 0) return String(cfg.fluidnc_ip);
 
+    // RTC date/time data sources
+    if (rtcAvailable) {
+        DateTime now = rtc.now();
+        char buffer[32];
+
+        if (strcmp(dataSource, "rtcTime") == 0) {
+            // Format: HH:MM:SS
+            sprintf(buffer, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+            return String(buffer);
+        }
+        if (strcmp(dataSource, "rtcTime12") == 0) {
+            // Format: HH:MM:SS AM/PM
+            int hour12 = now.hour() % 12;
+            if (hour12 == 0) hour12 = 12;
+            sprintf(buffer, "%02d:%02d:%02d %s", hour12, now.minute(), now.second(),
+                    now.hour() >= 12 ? "PM" : "AM");
+            return String(buffer);
+        }
+        if (strcmp(dataSource, "rtcTimeShort") == 0) {
+            // Format: HH:MM
+            sprintf(buffer, "%02d:%02d", now.hour(), now.minute());
+            return String(buffer);
+        }
+        if (strcmp(dataSource, "rtcDate") == 0) {
+            // Format: YYYY-MM-DD
+            sprintf(buffer, "%04d-%02d-%02d", now.year(), now.month(), now.day());
+            return String(buffer);
+        }
+        if (strcmp(dataSource, "rtcDateShort") == 0) {
+            // Format: MM/DD/YYYY
+            sprintf(buffer, "%02d/%02d/%04d", now.month(), now.day(), now.year());
+            return String(buffer);
+        }
+        if (strcmp(dataSource, "rtcDateTime") == 0) {
+            // Format: YYYY-MM-DD HH:MM:SS
+            sprintf(buffer, "%04d-%02d-%02d %02d:%02d:%02d",
+                    now.year(), now.month(), now.day(),
+                    now.hour(), now.minute(), now.second());
+            return String(buffer);
+        }
+    } else {
+        // RTC not available
+        if (strncmp(dataSource, "rtc", 3) == 0) {
+            return String("No RTC");
+        }
+    }
+
     // Numeric values as strings
     float value = getDataValue(dataSource);
     return String(value, 2);
@@ -237,60 +290,184 @@ void drawElement(const ScreenElement& elem) {
             break;
 
         case ELEM_TEXT_STATIC:
-            gfx.setTextSize(elem.textSize);
-            gfx.setTextColor(elem.color);
-            gfx.setCursor(elem.x, elem.y);
-            gfx.print(elem.label);
+            {
+                gfx.setTextColor(elem.color);
+                gfx.setTextSize(elem.textSize);
+
+                // Use old rendering if no w/h specified (backward compatibility)
+                if (elem.w == 0 || elem.h == 0) {
+                    gfx.setCursor(elem.x, elem.y);
+                    gfx.print(elem.label);
+                } else {
+                    // Use LovyanGFX smooth font rendering
+                    gfx.setFont(&fonts::Font2);
+                    float scale = elem.textSize * 1.0f;
+                    gfx.setTextSize(scale, scale);
+
+                    switch(elem.align) {
+                        case ALIGN_CENTER:
+                            gfx.setTextDatum(textdatum_t::middle_center);
+                            gfx.drawString(elem.label, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            break;
+                        case ALIGN_RIGHT:
+                            gfx.setTextDatum(textdatum_t::middle_right);
+                            gfx.drawString(elem.label, elem.x + elem.w, elem.y + elem.h / 2);
+                            break;
+                        default:  // ALIGN_LEFT
+                            gfx.setTextDatum(textdatum_t::middle_left);
+                            gfx.drawString(elem.label, elem.x, elem.y + elem.h / 2);
+                            break;
+                    }
+                }
+            }
             break;
 
         case ELEM_TEXT_DYNAMIC:
             {
-                gfx.setTextSize(elem.textSize);
                 gfx.setTextColor(elem.color);
-                gfx.setCursor(elem.x, elem.y);
+                gfx.setTextSize(elem.textSize);
 
                 String value = getDataString(elem.dataSource);
-                if (elem.showLabel && strlen(elem.label) > 0) {
-                    gfx.print(elem.label);
+
+                // Use old rendering if no w/h specified (backward compatibility)
+                if (elem.w == 0 || elem.h == 0) {
+                    gfx.setCursor(elem.x, elem.y);
+                    if (elem.showLabel && strlen(elem.label) > 0) {
+                        gfx.print(elem.label);
+                    }
+                    gfx.print(value);
+                } else {
+                    // Use LovyanGFX smooth font rendering
+                    gfx.setFont(&fonts::Font2);
+                    float scale = elem.textSize * 1.0f;
+                    gfx.setTextSize(scale, scale);
+
+                    String displayText = "";
+                    if (elem.showLabel && strlen(elem.label) > 0) {
+                        displayText = String(elem.label) + value;
+                    } else {
+                        displayText = value;
+                    }
+
+                    switch(elem.align) {
+                        case ALIGN_CENTER:
+                            gfx.setTextDatum(textdatum_t::middle_center);
+                            gfx.drawString(displayText, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            break;
+                        case ALIGN_RIGHT:
+                            gfx.setTextDatum(textdatum_t::middle_right);
+                            gfx.drawString(displayText, elem.x + elem.w, elem.y + elem.h / 2);
+                            break;
+                        default:  // ALIGN_LEFT
+                            gfx.setTextDatum(textdatum_t::middle_left);
+                            gfx.drawString(displayText, elem.x, elem.y + elem.h / 2);
+                            break;
+                    }
                 }
-                gfx.print(value);
             }
             break;
 
         case ELEM_TEMP_VALUE:
             {
-                gfx.setTextSize(elem.textSize);
                 gfx.setTextColor(elem.color);
-                gfx.setCursor(elem.x, elem.y);
+                gfx.setTextSize(elem.textSize);
 
                 float temp = getDataValue(elem.dataSource);
                 if (cfg.use_fahrenheit) {
                     temp = temp * 9.0 / 5.0 + 32.0;
                 }
 
-                if (elem.showLabel && strlen(elem.label) > 0) {
-                    gfx.print(elem.label);
+                // Use old rendering if no w/h specified (backward compatibility)
+                if (elem.w == 0 || elem.h == 0) {
+                    gfx.setCursor(elem.x, elem.y);
+                    if (elem.showLabel && strlen(elem.label) > 0) {
+                        gfx.print(elem.label);
+                    }
+                    gfx.printf("%.*f%c", elem.decimals, temp,
+                              cfg.use_fahrenheit ? 'F' : 'C');
+                } else {
+                    // Use LovyanGFX smooth font rendering
+                    gfx.setFont(&fonts::Font2);
+                    float scale = elem.textSize * 1.0f;
+                    gfx.setTextSize(scale, scale);
+
+                    char tempStr[32];
+                    snprintf(tempStr, sizeof(tempStr), "%.*f%c", elem.decimals, temp,
+                            cfg.use_fahrenheit ? 'F' : 'C');
+
+                    String displayText = "";
+                    if (elem.showLabel && strlen(elem.label) > 0) {
+                        displayText = String(elem.label) + String(tempStr);
+                    } else {
+                        displayText = String(tempStr);
+                    }
+
+                    switch(elem.align) {
+                        case ALIGN_CENTER:
+                            gfx.setTextDatum(textdatum_t::middle_center);
+                            gfx.drawString(displayText, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            break;
+                        case ALIGN_RIGHT:
+                            gfx.setTextDatum(textdatum_t::middle_right);
+                            gfx.drawString(displayText, elem.x + elem.w, elem.y + elem.h / 2);
+                            break;
+                        default:  // ALIGN_LEFT
+                            gfx.setTextDatum(textdatum_t::middle_left);
+                            gfx.drawString(displayText, elem.x, elem.y + elem.h / 2);
+                            break;
+                    }
                 }
-                gfx.printf("%.*f%c", elem.decimals, temp,
-                          cfg.use_fahrenheit ? 'F' : 'C');
             }
             break;
 
         case ELEM_COORD_VALUE:
             {
-                gfx.setTextSize(elem.textSize);
                 gfx.setTextColor(elem.color);
-                gfx.setCursor(elem.x, elem.y);
+                gfx.setTextSize(elem.textSize);
 
                 float value = getDataValue(elem.dataSource);
                 if (cfg.use_inches) {
                     value = value / 25.4;
                 }
 
-                if (elem.showLabel && strlen(elem.label) > 0) {
-                    gfx.print(elem.label);
+                // Use old rendering if no w/h specified (backward compatibility)
+                if (elem.w == 0 || elem.h == 0) {
+                    gfx.setCursor(elem.x, elem.y);
+                    if (elem.showLabel && strlen(elem.label) > 0) {
+                        gfx.print(elem.label);
+                    }
+                    gfx.printf("%.*f", elem.decimals, value);
+                } else {
+                    // Use LovyanGFX smooth font rendering
+                    gfx.setFont(&fonts::Font2);
+                    float scale = elem.textSize * 1.0f;
+                    gfx.setTextSize(scale, scale);
+
+                    char coordStr[32];
+                    snprintf(coordStr, sizeof(coordStr), "%.*f", elem.decimals, value);
+
+                    String displayText = "";
+                    if (elem.showLabel && strlen(elem.label) > 0) {
+                        displayText = String(elem.label) + String(coordStr);
+                    } else {
+                        displayText = String(coordStr);
+                    }
+
+                    switch(elem.align) {
+                        case ALIGN_CENTER:
+                            gfx.setTextDatum(textdatum_t::middle_center);
+                            gfx.drawString(displayText, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            break;
+                        case ALIGN_RIGHT:
+                            gfx.setTextDatum(textdatum_t::middle_right);
+                            gfx.drawString(displayText, elem.x + elem.w, elem.y + elem.h / 2);
+                            break;
+                        default:  // ALIGN_LEFT
+                            gfx.setTextDatum(textdatum_t::middle_left);
+                            gfx.drawString(displayText, elem.x, elem.y + elem.h / 2);
+                            break;
+                    }
                 }
-                gfx.printf("%.*f", elem.decimals, value);
             }
             break;
 
@@ -311,14 +488,43 @@ void drawElement(const ScreenElement& elem) {
                     gfx.setTextColor(elem.color);
                 }
 
-                gfx.setCursor(elem.x, elem.y);
-
-                if (elem.showLabel && strlen(elem.label) > 0) {
-                    gfx.print(elem.label);
-                }
-
                 String value = getDataString(elem.dataSource);
-                gfx.print(value);
+
+                // Use old rendering if no w/h specified (backward compatibility)
+                if (elem.w == 0 || elem.h == 0) {
+                    gfx.setCursor(elem.x, elem.y);
+                    if (elem.showLabel && strlen(elem.label) > 0) {
+                        gfx.print(elem.label);
+                    }
+                    gfx.print(value);
+                } else {
+                    // Use LovyanGFX smooth font rendering
+                    gfx.setFont(&fonts::Font2);
+                    float scale = elem.textSize * 1.0f;
+                    gfx.setTextSize(scale, scale);
+
+                    String displayText = "";
+                    if (elem.showLabel && strlen(elem.label) > 0) {
+                        displayText = String(elem.label) + value;
+                    } else {
+                        displayText = value;
+                    }
+
+                    switch(elem.align) {
+                        case ALIGN_CENTER:
+                            gfx.setTextDatum(textdatum_t::middle_center);
+                            gfx.drawString(displayText, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            break;
+                        case ALIGN_RIGHT:
+                            gfx.setTextDatum(textdatum_t::middle_right);
+                            gfx.drawString(displayText, elem.x + elem.w, elem.y + elem.h / 2);
+                            break;
+                        default:  // ALIGN_LEFT
+                            gfx.setTextDatum(textdatum_t::middle_left);
+                            gfx.drawString(displayText, elem.x, elem.y + elem.h / 2);
+                            break;
+                    }
+                }
             }
             break;
 
@@ -340,12 +546,51 @@ void drawElement(const ScreenElement& elem) {
             break;
 
         case ELEM_GRAPH:
-            // Placeholder for mini-graph rendering
-            gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
-            gfx.setTextSize(1);
-            gfx.setTextColor(elem.color);
-            gfx.setCursor(elem.x + 5, elem.y + 5);
-            gfx.print("GRAPH");
+            {
+                // Draw temperature graph
+                gfx.fillRect(elem.x, elem.y, elem.w, elem.h, elem.bgColor);
+                gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+
+                if (tempHistory != nullptr && historySize > 0) {
+                    float minTemp = 10.0;
+                    float maxTemp = 60.0;
+
+                    // Draw temperature line
+                    for (int i = 1; i < historySize; i++) {
+                        int idx1 = (historyIndex + i - 1) % historySize;
+                        int idx2 = (historyIndex + i) % historySize;
+
+                        float temp1 = tempHistory[idx1];
+                        float temp2 = tempHistory[idx2];
+
+                        int x1 = elem.x + ((i - 1) * elem.w / historySize);
+                        int y1 = elem.y + elem.h - ((temp1 - minTemp) / (maxTemp - minTemp) * elem.h);
+                        int x2 = elem.x + (i * elem.w / historySize);
+                        int y2 = elem.y + elem.h - ((temp2 - minTemp) / (maxTemp - minTemp) * elem.h);
+
+                        y1 = constrain(y1, elem.y, elem.y + elem.h);
+                        y2 = constrain(y2, elem.y, elem.y + elem.h);
+
+                        // Color based on temperature (use element color or threshold-based)
+                        uint16_t color;
+                        if (temp2 > cfg.temp_threshold_high) color = COLOR_WARN;
+                        else if (temp2 > cfg.temp_threshold_low) color = COLOR_ORANGE;
+                        else color = COLOR_GOOD;
+
+                        gfx.drawLine(x1, y1, x2, y2, color);
+                    }
+
+                    // Scale markers
+                    gfx.setTextSize(1);
+                    gfx.setTextColor(elem.color);
+                    gfx.setCursor(elem.x + 3, elem.y + 2);
+                    gfx.print("60");
+                    gfx.setCursor(elem.x + 3, elem.y + elem.h / 2 - 5);
+                    gfx.print("35");
+                    gfx.setCursor(elem.x + 3, elem.y + elem.h - 10);
+                    gfx.print("10");
+                }
+            }
             break;
 
         default:

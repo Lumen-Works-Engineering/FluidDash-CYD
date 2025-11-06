@@ -1,0 +1,175 @@
+{
+  "name": "Alignment Mode",
+  "background": "0000",
+  "elements": [
+    {
+      "type": "rect",
+      "x": 0,
+      "y": 0,
+      "w": 480,
+      "h": 32,
+      "color": "17BF",
+      "filled": true
+    },
+    {
+      "type": "text",
+      "x": 140,
+      "y": 2,
+      "size": 3,
+      "color": "FFFF",
+      "label": "ALIGNMENT MODE"
+    },
+    {
+      "type": "line",
+      "x": 0,
+      "y": 32,
+      "w": 480,
+      "h": 1,
+      "color": "4A49"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 50,
+      "size": 2,
+      "color": "95BF",
+      "label": "Work Coordinates (WCS):"
+    },
+    {
+      "type": "coord",
+      "x": 50,
+      "y": 80,
+      "w": 180,
+      "h": 30,
+      "size": 3,
+      "color": "07FF",
+      "bgColor": "0000",
+      "label": "X: ",
+      "data": "wposX",
+      "decimals": 3,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "coord",
+      "x": 50,
+      "y": 120,
+      "w": 180,
+      "h": 30,
+      "size": 3,
+      "color": "07FF",
+      "bgColor": "0000",
+      "label": "Y: ",
+      "data": "wposY",
+      "decimals": 3,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "coord",
+      "x": 50,
+      "y": 160,
+      "w": 180,
+      "h": 30,
+      "size": 3,
+      "color": "07FF",
+      "bgColor": "0000",
+      "label": "Z: ",
+      "data": "wposZ",
+      "decimals": 3,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "line",
+      "x": 240,
+      "y": 45,
+      "w": 1,
+      "h": 175,
+      "color": "4A49"
+    },
+    {
+      "type": "text",
+      "x": 260,
+      "y": 50,
+      "size": 2,
+      "color": "95BF",
+      "label": "Machine Coordinates:"
+    },
+    {
+      "type": "coord",
+      "x": 290,
+      "y": 80,
+      "w": 180,
+      "h": 30,
+      "size": 3,
+      "color": "FFFF",
+      "bgColor": "0000",
+      "label": "X: ",
+      "data": "posX",
+      "decimals": 3,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "coord",
+      "x": 290,
+      "y": 120,
+      "w": 180,
+      "h": 30,
+      "size": 3,
+      "color": "FFFF",
+      "bgColor": "0000",
+      "label": "Y: ",
+      "data": "posY",
+      "decimals": 3,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "coord",
+      "x": 290,
+      "y": 160,
+      "w": 180,
+      "h": 30,
+      "size": 3,
+      "color": "FFFF",
+      "bgColor": "0000",
+      "label": "Z: ",
+      "data": "posZ",
+      "decimals": 3,
+      "showLabel": true,
+      "align": "left"
+    },
+    {
+      "type": "line",
+      "x": 0,
+      "y": 220,
+      "w": 480,
+      "h": 1,
+      "color": "4A49"
+    },
+    {
+      "type": "text",
+      "x": 10,
+      "y": 235,
+      "size": 2,
+      "color": "95BF",
+      "label": "Machine State:"
+    },
+    {
+      "type": "status",
+      "x": 10,
+      "y": 260,
+      "w": 460,
+      "h": 40,
+      "size": 3,
+      "color": "07FF",
+      "bgColor": "0000",
+      "label": "",
+      "data": "machineState",
+      "showLabel": false,
+      "align": "center"
+    }
+  ]
+}

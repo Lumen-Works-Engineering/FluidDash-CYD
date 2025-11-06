@@ -45,7 +45,7 @@
     },
     {
       "type": "dynamic",
-      "x": 80,
+      "x": 40,
       "y": 60,
       "size": 2,
       "color": "07FF",
@@ -57,10 +57,10 @@
     },
     {
       "type": "dynamic",
-      "x": 140,
+      "x": 100,
       "y": 60,
       "size": 2,
-      "color": "07FF",
+      "color": "F800",
       "bgColor": "0000",
       "label": "",
       "data": "temp0",
@@ -77,25 +77,25 @@
     },
     {
       "type": "dynamic",
-      "x": 80,
+      "x": 40,
       "y": 85,
       "size": 2,
       "color": "07FF",
       "bgColor": "0000",
       "label": "",
-      "data": "temp1",
+      "data": "temp0",
       "decimals": 0,
       "showLabel": false
     },
     {
       "type": "dynamic",
-      "x": 140,
+      "x": 100,
       "y": 85,
       "size": 2,
-      "color": "07FF",
+      "color": "F800",
       "bgColor": "0000",
       "label": "",
-      "data": "temp1",
+      "data": "temp0",
       "decimals": 0,
       "showLabel": false
     },
@@ -109,25 +109,25 @@
     },
     {
       "type": "dynamic",
-      "x": 80,
+      "x": 40,
       "y": 110,
       "size": 2,
       "color": "07FF",
       "bgColor": "0000",
       "label": "",
-      "data": "temp2",
+      "data": "temp0",
       "decimals": 0,
       "showLabel": false
     },
     {
       "type": "dynamic",
-      "x": 140,
+      "x": 100,
       "y": 110,
       "size": 2,
-      "color": "07FF",
+      "color": "F800",
       "bgColor": "0000",
       "label": "",
-      "data": "temp2",
+      "data": "temp0",
       "decimals": 0,
       "showLabel": false
     },
@@ -141,25 +141,25 @@
     },
     {
       "type": "dynamic",
-      "x": 80,
+      "x": 40,
       "y": 135,
       "size": 2,
       "color": "07FF",
       "bgColor": "0000",
       "label": "",
-      "data": "temp3",
+      "data": "temp0",
       "decimals": 0,
       "showLabel": false
     },
     {
       "type": "dynamic",
-      "x": 140,
+      "x": 100,
       "y": 135,
       "size": 2,
-      "color": "07FF",
+      "color": "F800",
       "bgColor": "0000",
       "label": "",
-      "data": "temp3",
+      "data": "temp0",
       "decimals": 0,
       "showLabel": false
     },
@@ -177,17 +177,8 @@
       "x": 210,
       "y": 45,
       "size": 1,
-      "color": "95BF",
+      "color": "FFFF",
       "label": "TEMP HISTORY(5 min)"
-    },
-    {
-      "type": "graph",
-      "x": 205,
-      "y": 60,
-      "w": 270,
-      "h": 95,
-      "color": "4A49",
-      "bgColor": "0000"
     },
     {
       "type": "text",
@@ -203,7 +194,7 @@
       "y": 160,
       "size": 2,
       "color": "07FF",
-      "data": "fanSpeed",
+      "data": "temp0",
       "label": "",
       "decimals": 0,
       "showLabel": false
@@ -222,7 +213,7 @@
       "y": 160,
       "size": 2,
       "color": "07E0",
-      "data": "psuVoltage",
+      "data": "temp0",
       "label": "",
       "decimals": 1,
       "showLabel": false
@@ -230,8 +221,8 @@
     {
       "type": "text",
       "x": 5,
-      "y": 180,
-      "size": 2,
+      "y": 190,
+      "size": 1,
       "color": "95BF",
       "label": "FluidNC:"
     },
@@ -251,7 +242,7 @@
     {
       "type": "text",
       "x": 5,
-      "y": 275,
+      "y": 260,
       "size": 2,
       "color": "95BF",
       "label": "WCS:"
@@ -259,7 +250,7 @@
     {
       "type": "coord",
       "x": 55,
-      "y": 275,
+      "y": 260,
       "w": 80,
       "h": 20,
       "size": 2,
@@ -273,7 +264,7 @@
     {
       "type": "coord",
       "x": 155,
-      "y": 275,
+      "y": 260,
       "w": 80,
       "h": 20,
       "size": 2,
@@ -281,13 +272,13 @@
       "bgColor": "0000",
       "label": "Y:",
       "data": "wposY",
-      "decimals": 3,
+      "decimals": 2,
       "showLabel": true
     },
     {
       "type": "coord",
       "x": 255,
-      "y": 275,
+      "y": 260,
       "w": 80,
       "h": 20,
       "size": 2,
@@ -295,113 +286,24 @@
       "bgColor": "0000",
       "label": "Z:",
       "data": "wposZ",
-      "decimals": 3,
+      "decimals": 2,
       "showLabel": true
     },
     {
       "type": "text",
       "x": 5,
-      "y": 295,
+      "y": 290,
       "size": 2,
       "color": "7BEF",
       "label": "MCS:"
     },
     {
       "type": "text",
-      "x": 140,
+      "x": 100,
       "y": 40,
       "size": 2,
       "color": "95BF",
       "label": "Peak:"
-    },
-    {
-      "type": "line",
-      "x": 0,
-      "y": 180,
-      "w": 480,
-      "h": 1,
-      "color": "4A49"
-    },
-    {
-      "type": "coord",
-      "x": 55,
-      "y": 295,
-      "w": 80,
-      "h": 20,
-      "size": 2,
-      "color": "FFFF",
-      "bgColor": "0000",
-      "label": "X:",
-      "data": "posX",
-      "decimals": 3
-    },
-    {
-      "type": "coord",
-      "x": 155,
-      "y": 295,
-      "w": 80,
-      "h": 20,
-      "size": 2,
-      "color": "FFFF",
-      "bgColor": "0000",
-      "label": "Y:",
-      "data": "posY",
-      "decimals": 3
-    },
-    {
-      "type": "coord",
-      "x": 255,
-      "y": 295,
-      "w": 80,
-      "h": 20,
-      "size": 2,
-      "color": "FFFF",
-      "bgColor": "0000",
-      "label": "Z:",
-      "data": "posZ",
-      "decimals": 3
-    },
-    {
-      "type": "line",
-      "x": 200,
-      "y": 160,
-      "w": 280,
-      "h": 1,
-      "color": "4A49"
-    },
-    {
-      "type": "coord",
-      "x": 345,
-      "y": 275,
-      "w": 80,
-      "h": 20,
-      "size": 2,
-      "color": "07FF",
-      "bgColor": "0000",
-      "label": "A:",
-      "data": "wposA",
-      "decimals": 3
-    },
-    {
-      "type": "coord",
-      "x": 345,
-      "y": 295,
-      "w": 80,
-      "h": 20,
-      "size": 2,
-      "color": "FFFF",
-      "bgColor": "0000",
-      "label": "A:",
-      "data": "posA",
-      "decimals": 3
-    },
-    {
-      "type": "line",
-      "x": 0,
-      "y": 270,
-      "w": 480,
-      "h": 1,
-      "color": "4A49"
     }
   ]
 }

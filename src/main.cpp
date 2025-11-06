@@ -788,35 +788,35 @@ void setup() {
     feedLoopWDT();
     initDefaultLayouts();  // Initialize fallback state
 
-    if (sdCardAvailable) {
+    if (storage.isSPIFFSAvailable() || sdCardAvailable) {
         Serial.println("\n=== Loading JSON Screen Layouts ===");
-        
+
         // Try to load monitor layout
         if (loadScreenConfig("/screens/monitor.json", monitorLayout)) {
             Serial.println("[JSON] Monitor layout loaded successfully");
         } else {
             Serial.println("[JSON] Monitor layout not found or invalid, using fallback");
         }
-        
+
         // Try to load alignment layout (optional for now)
         if (loadScreenConfig("/screens/alignment.json", alignmentLayout)) {
             Serial.println("[JSON] Alignment layout loaded successfully");
         }
-        
+
         // Try to load graph layout (optional for now)
         if (loadScreenConfig("/screens/graph.json", graphLayout)) {
             Serial.println("[JSON] Graph layout loaded successfully");
         }
-        
+
         // Try to load network layout (optional for now)
         if (loadScreenConfig("/screens/network.json", networkLayout)) {
             Serial.println("[JSON] Network layout loaded successfully");
         }
-        
+
         layoutsLoaded = true;
         Serial.println("=== JSON Layout Loading Complete ===\n");
     } else {
-        Serial.println("[JSON] SD card not available, using legacy drawing\n");
+        Serial.println("[JSON] No storage available (SD/SPIFFS), using legacy drawing\n");
     }
     // ========== END PHASE 2 LAYOUT LOADING ==========
     feedLoopWDT();
@@ -1322,6 +1322,7 @@ void setupWebServer() {
   });
   server.on("/api/wifi/connect", HTTP_POST, handleAPIWiFiConnect);
   server.on("/api/reload-screens", HTTP_POST, handleAPIReloadScreens);
+  server.on("/api/reload-screens", HTTP_GET, handleAPIReloadScreens);  // Also accept GET
   server.on("/api/rtc", HTTP_GET, handleAPIRTC);
   server.on("/api/rtc/set", HTTP_POST, handleAPIRTCSet);
   // PHASE 2: Re-enabled with SPIFFS-based upload (safe)
