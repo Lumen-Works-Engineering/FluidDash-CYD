@@ -3,38 +3,16 @@
 
 #include <Arduino.h>
 
-/**
- * @brief HTML page generators
- *
- * This module provides functions to generate HTML pages with
- * dynamic content replacement.
- *
- * NOTE: Currently uses PROGMEM strings. Future enhancement:
- * Load HTML templates from SPIFFS/SD card for easier editing.
- */
+// External references to HTML templates defined in main.cpp
+extern const char MAIN_HTML[] PROGMEM;
+extern const char SETTINGS_HTML[] PROGMEM;
+extern const char ADMIN_HTML[] PROGMEM;
+extern const char WIFI_CONFIG_HTML[] PROGMEM;
 
-/**
- * @brief Get main dashboard HTML page
- * @return HTML string with placeholders replaced
- */
+// Function declarations
 String getMainHTML();
-
-/**
- * @brief Get settings configuration HTML page
- * @return HTML string with placeholders replaced
- */
 String getSettingsHTML();
-
-/**
- * @brief Get admin/calibration HTML page
- * @return HTML string with placeholders replaced
- */
 String getAdminHTML();
-
-/**
- * @brief Get WiFi configuration HTML page
- * @return HTML string with placeholders replaced
- */
 String getWiFiConfigHTML();
 
 #endif // HTML_PAGES_H
