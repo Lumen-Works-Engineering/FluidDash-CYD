@@ -23,7 +23,72 @@ extern float *tempHistory;
 extern uint16_t historySize;
 extern uint16_t historyIndex;
 
-// ========== JSON PARSING FUNCTIONS ==========
+void setFont(JsonObject& elem) {
+  if (elem["font"].is<String>()) {
+    String fontName = elem["font"];
+    if (fontName == "FreeSans12pt7b") {
+      // Use LovyanGFX smooth font fallback (replace undefined 'tft')
+      // If you have a different smooth font available, replace &fonts::Font2 with that pointer.
+      gfx.setFont(&fonts::Font2);
+    } else {
+      // Unknown named font -> fallback to a default smooth font
+      gfx.setFont(&fonts::Font2);
+    }
+  } else {
+    // Numeric font fallback: map to the same LovyanGFX fallback font to avoid tft dependency
+    int fontNum = elem["font"] | 2;
+    (void)fontNum; // fontNum currently unused; keep to preserve JSON semantics
+    gfx.setFont(&fonts::Font2);
+  }
+}
+
+// Since GraphElement is used like other element types, we should use ScreenElement instead
+void renderGraph(const ScreenElement& elem) {
+    // Draw temperature graph
+    gfx.fillRect(elem.x, elem.y, elem.w, elem.h, elem.bgColor);
+    gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+
+    if (tempHistory != nullptr && historySize > 0) {
+        float minTemp = 10.0;
+        float maxTemp = 60.0;
+
+        // Draw temperature line
+        for (int i = 1; i < historySize; i++) {
+            int idx1 = (historyIndex + i - 1) % historySize;
+            int idx2 = (historyIndex + i) % historySize;
+
+            float temp1 = tempHistory[idx1];
+            float temp2 = tempHistory[idx2];
+
+            int x1 = elem.x + ((i - 1) * elem.w / historySize);
+            int y1 = elem.y + elem.h - ((temp1 - minTemp) / (maxTemp - minTemp) * elem.h);
+            int x2 = elem.x + (i * elem.w / historySize);
+            int y2 = elem.y + elem.h - ((temp2 - minTemp) / (maxTemp - minTemp) * elem.h);
+
+            y1 = constrain(y1, elem.y, elem.y + elem.h);
+            y2 = constrain(y2, elem.y, elem.y + elem.h);
+
+            gfx.drawLine(x1, y1, x2, y2, elem.color);
+        }
+    }
+}
+
+// Add: simple month abbreviation helper used by formatDateTime
+static const char* monthShortStr(uint8_t month) {
+    static const char* months[] = {
+        "Jan","Feb","Mar","Apr","May","Jun",
+        "Jul","Aug","Sep","Oct","Nov","Dec"
+    };
+    if (month >= 1 && month <= 12) return months[month - 1];
+    return "???";
+}
+
+String formatDateTime(const DateTime& dt) {
+  char buffer[20];
+  snprintf(buffer, sizeof(buffer), "%s %02d %02d:%02d", 
+    monthShortStr(dt.month()), dt.day(), dt.hour(), dt.minute());
+  return String(buffer);
+}
 
 // Convert hex color string to uint16_t RGB565
 uint16_t parseColor(const char* hexColor) {
