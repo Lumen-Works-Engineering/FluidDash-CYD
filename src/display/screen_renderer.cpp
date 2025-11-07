@@ -34,7 +34,7 @@ void selectBestFont(int textSize) {
 
 // Replace ambiguous/undefined createDocument(...) with a proper ArduinoJson document.
 // Use heap allocation to avoid large static/global stack usage.
-DynamicJsonDocument doc(8192);
+StaticJsonDocument<8192> doc;
 
 // Replace applyFontFromJson with safer reads (use .as<T>() and null checks)
 // Replace the previous setFont(JsonObject& elem) implementation with a safe, internal variant-aware helper.
@@ -192,7 +192,7 @@ bool validateDataSource(const char* source, char* normalizedOut, size_t outSize)
             } else {
                 strncpy(normalizedOut, source, outSize - 1);
             }
-            normalizedOut[outSize - 1] = '\\0';
+            normalizedOut[outSize - 1] = '\0';
             return true;
         }
     }
@@ -202,41 +202,12 @@ bool validateDataSource(const char* source, char* normalizedOut, size_t outSize)
 
     // Still copy it (might be added later)
     strncpy(normalizedOut, source, outSize - 1);
-    normalizedOut[outSize - 1] = '\\0';
+    normalizedOut[outSize - 1] = '\0';
     return false;
 }
 
 // Load screen configuration from JSON file
 bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
-    // Check for expected JSON structure
-    if (!doc["elements"]) {
-        Serial.println("[JSON] ERROR: Missing 'elements' array!");
-        Serial.println("[JSON] Expected format:");
-        Serial.println("[JSON]   { \\\"name\\\": \\\"...\\\", \\\"width\\\": 480, \\\"height\\\": 320, \\\"elements\\\": [...] }");
-        return false;
-    }
-
-    // Warn about missing optional fields
-    if (!doc["width"]) {
-        Serial.println("[JSON] Warning: Missing 'width' field (assuming 480)");
-    }
-    if (!doc["height"]) {
-        Serial.println("[JSON] Warning: Missing 'height' field (assuming 320)");
-    }
-
-    // Check for old schema (uses 'source' instead of 'data')
-    JsonArray elements = doc["elements"].as<JsonArray>();
-    if (elements.size() > 0) {
-        JsonObject firstElem = elements[0];
-        if (firstElem["source"] && !firstElem["data"]) {
-            Serial.println("[JSON] ERROR: Old JSON schema detected!");
-            Serial.println("[JSON] This file uses 'source' field, but renderer expects 'data'");
-            Serial.println("[JSON] Please update JSON files to use 'data' instead of 'source'");
-            return false;
-        }
-    }
-    Serial.printf("[JSON] Loading screen config: %s\n", filename);
-
     // Use StorageManager to load file (auto-fallback SD->SPIFFS)
     String jsonContent = storage.loadFile(filename);
 
@@ -265,19 +236,44 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
         return false;
     }
 
-    // ===== ENHANCED ERROR CHECKING =====
-    // NOTE: Removed misplaced validation block that referenced undefined variables (elem, elementIndex)
-    // The per-element validation is now performed inside the element parsing loop below.
-    // ===== END ERROR CHECKING =====
+    // ===== VALIDATION AFTER PARSE =====
+    // Now it's safe to inspect the parsed document.
+    if (!doc["elements"]) {
+        Serial.println("[JSON] ERROR: Missing 'elements' array!");
+        Serial.println("[JSON] Expected format:");
+        Serial.println("[JSON]   { \\\"name\\\": \\\"...\\\", \\\"width\\\": 480, \\\"height\\\": 320, \\\"elements\\\": [...] }");
+        return false;
+    }
 
+    // Warn about missing optional fields
+    if (!doc["width"]) {
+        Serial.println("[JSON] Warning: Missing 'width' field (assuming 480)");
+    }
+    if (!doc["height"]) {
+        Serial.println("[JSON] Warning: Missing 'height' field (assuming 320)");
+    }
+
+    // Declare and use a single JsonArray variable (avoid redeclaration)
+    JsonArray elements = doc["elements"].as<JsonArray>();
+    if (elements.size() > 0) {
+        JsonObject firstElem = elements[0];
+        if (firstElem["source"] && !firstElem["data"]) {
+            Serial.println("[JSON] ERROR: Old JSON schema detected!");
+            Serial.println("[JSON] This file uses 'source' field, but renderer expects 'data'");
+            Serial.println("[JSON] Please update JSON files to use 'data' instead of 'source'");
+            return false;
+        }
+    }
+    Serial.printf("[JSON] Loading screen config: %s\n", filename);
+
+    // ===== CONTINUE PARSING =====
     // Extract layout info
     strncpy(layout.name, doc["name"] | "Unnamed", sizeof(layout.name) - 1);
     layout.backgroundColor = parseColor(doc["background"] | "0000");
     layout.elementCount = 0;
     layout.isValid = false;
 
-    // Parse elements array
-    JsonArray elements = doc["elements"].as<JsonArray>();
+    // Parse elements array (reuse 'elements' declared above)
     if (!elements) {
         Serial.println("[JSON] No elements array found");
         return false;
@@ -509,6 +505,7 @@ void drawElement(const ScreenElement& el) {
 
         case ELEM_TEXT_DYNAMIC:
             {
+                yield(); // Yield before dynamic text processing
                 gfx.setTextColor(el.color);
                 gfx.setTextSize(el.textSize);
 
@@ -732,6 +729,7 @@ void drawElement(const ScreenElement& el) {
 
         case ELEM_GRAPH:
             {
+                yield(); // Graph rendering can be slow
                 // Draw temperature graph
                 gfx.fillRect(el.x, el.y, el.w, el.h, el.bgColor);
                 gfx.drawRect(el.x, el.y, el.w, el.h, el.color);
@@ -775,6 +773,8 @@ void drawElement(const ScreenElement& el) {
                     gfx.setCursor(el.x + 3, el.y + el.h - 10);
                     gfx.print("10");
                 }
+                
+                yield();  // Final yield after graph
             }
             break;
 
@@ -792,9 +792,20 @@ void drawScreenFromLayout(const ScreenLayout& layout) {
 
     // Clear screen with background color
     gfx.fillScreen(layout.backgroundColor);
+    yield();  // Yield after screen clear
+
+    Serial.printf("[JSON] Drawing %d elements from layout\n", layout.elementCount);
 
     // Draw all elements
     for (uint8_t i = 0; i < layout.elementCount; i++) {
         drawElement(layout.elements[i]);
+        // Yield every 5 elements to prevent watchdog timeout
+        if (i % 5 == 0) {
+            yield();
+        }
     }
+    
+    yield();  // Final yield after all elements drawn
+    Serial.println("[JSON] Layout drawing complete");
 }
+

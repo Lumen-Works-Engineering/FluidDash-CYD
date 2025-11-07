@@ -1,5 +1,5 @@
 {
-  "name": "FluidDash",
+  "name": "Test Screen",
   "width": 480,
   "height": 320,
   "background": "0000",
@@ -9,315 +9,47 @@
       "x": 0,
       "y": 0,
       "w": 480,
-      "h": 32,
-      "color": "17BF",
+      "h": 40,
+      "color": "001F",
       "filled": true
     },
     {
       "type": "text",
-      "x": 3,
-      "y": 2,
-      "size": 3,
+      "x": 10,
+      "y": 10,
+      "size": 2,
       "color": "FFFF",
-      "label": "FluidDash"
+      "label": "TEST MODE - FluidDash"
     },
     {
       "type": "dynamic",
-      "x": 240,
-      "y": 5,
+      "x": 300,
+      "y": 10,
       "size": 2,
       "color": "FFFF",
-      "label": "",
       "data": "rtcDateTime",
+      "label": "",
       "decimals": 0,
       "showLabel": false
     },
     {
-      "type": "line",
-      "x": 0,
-      "y": 32,
-      "w": 480,
-      "h": 1,
-      "color": "4A49"
-    },
-    {
-      "type": "text",
-      "x": 10,
-      "y": 40,
-      "size": 2,
-      "color": "95BF",
-      "label": "Temperatures"
-    },
-    {
-      "type": "text",
-      "x": 210,
-      "y": 40,
-      "size": 2,
-      "color": "95BF",
-      "label": "Peaks (5min)"
-    },
-    {
       "type": "text",
       "x": 10,
       "y": 60,
-      "size": 2,
+      "size": 3,
       "color": "07FF",
-      "label": "X:"
+      "label": "Temp X:"
     },
     {
       "type": "dynamic",
-      "x": 50,
+      "x": 150,
       "y": 60,
-      "size": 2,
-      "color": "07FF",
+      "size": 3,
+      "color": "F800",
       "data": "temp0",
       "label": "",
       "decimals": 1,
       "showLabel": false
-    },
-    {
-      "type": "dynamic",
-      "x": 235,
-      "y": 60,
-      "size": 2,
-      "color": "F800",
-      "data": "temp0Peak",
-      "label": "",
-      "decimals": 1,
-      "showLabel": false
-    },
-    {
-      "type": "text",
-      "x": 10,
-      "y": 80,
-      "size": 2,
-      "color": "07FF",
-      "label": "YL:"
-    },
-    {
-      "type": "dynamic",
-      "x": 50,
-      "y": 80,
-      "size": 2,
-      "color": "07FF",
-      "data": "temp1",
-      "label": "",
-      "decimals": 1,
-      "showLabel": false
-    },
-    {
-      "type": "dynamic",
-      "x": 235,
-      "y": 80,
-      "size": 2,
-      "color": "F800",
-      "data": "temp1Peak",
-      "label": "",
-      "decimals": 1,
-      "showLabel": false
-    },
-    {
-      "type": "text",
-      "x": 10,
-      "y": 100,
-      "size": 2,
-      "color": "07FF",
-      "label": "YR:"
-    },
-    {
-      "type": "dynamic",
-      "x": 50,
-      "y": 100,
-      "size": 2,
-      "color": "07FF",
-      "data": "temp2",
-      "label": "",
-      "decimals": 1,
-      "showLabel": false
-    },
-    {
-      "type": "dynamic",
-      "x": 235,
-      "y": 100,
-      "size": 2,
-      "color": "F800",
-      "data": "temp2Peak",
-      "label": "",
-      "decimals": 1,
-      "showLabel": false
-    },
-    {
-      "type": "text",
-      "x": 10,
-      "y": 120,
-      "size": 2,
-      "color": "07FF",
-      "label": "Z:"
-    },
-    {
-      "type": "dynamic",
-      "x": 50,
-      "y": 120,
-      "size": 2,
-      "color": "07FF",
-      "data": "temp3",
-      "label": "",
-      "decimals": 1,
-      "showLabel": false
-    },
-    {
-      "type": "dynamic",
-      "x": 235,
-      "y": 120,
-      "size": 2,
-      "color": "F800",
-      "data": "temp3Peak",
-      "label": "",
-      "decimals": 1,
-      "showLabel": false
-    },
-    {
-      "type": "graph",
-      "x": 300,
-      "y": 50,
-      "w": 170,
-      "h": 90,
-      "color": "07FF",
-      "bgColor": "0000"
-    },
-    {
-      "type": "line",
-      "x": 0,
-      "y": 145,
-      "w": 480,
-      "h": 1,
-      "color": "4A49"
-    },
-    {
-      "type": "text",
-      "x": 10,
-      "y": 155,
-      "size": 2,
-      "color": "07FF",
-      "label": "Fan:"
-    },
-    {
-      "type": "dynamic",
-      "x": 60,
-      "y": 155,
-      "size": 2,
-      "color": "07FF",
-      "data": "fanSpeed",
-      "label": "",
-      "decimals": 0,
-      "showLabel": false
-    },
-    {
-      "type": "text",
-      "x": 120,
-      "y": 155,
-      "size": 2,
-      "color": "07FF",
-      "label": "RPM"
-    },
-    {
-      "type": "text",
-      "x": 240,
-      "y": 155,
-      "size": 2,
-      "color": "07E0",
-      "label": "PSU:"
-    },
-    {
-      "type": "dynamic",
-      "x": 290,
-      "y": 155,
-      "size": 2,
-      "color": "07E0",
-      "data": "psuVoltage",
-      "label": "",
-      "decimals": 1,
-      "showLabel": false
-    },
-    {
-      "type": "text",
-      "x": 10,
-      "y": 185,
-      "size": 2,
-      "color": "95BF",
-      "label": "FluidNC:"
-    },
-    {
-      "type": "dynamic",
-      "x": 10,
-      "y": 205,
-      "w": 460,
-      "h": 30,
-      "size": 3,
-      "color": "07FF",
-      "data": "machineState",
-      "label": "",
-      "showLabel": false
-    },
-    {
-      "type": "text",
-      "x": 10,
-      "y": 245,
-      "size": 2,
-      "color": "95BF",
-      "label": "WCS:"
-    },
-    {
-      "type": "dynamic",
-      "x": 60,
-      "y": 245,
-      "w": 90,
-      "h": 20,
-      "size": 2,
-      "color": "07FF",
-      "data": "wposX",
-      "label": "X:",
-      "decimals": 2,
-      "showLabel": true
-    },
-    {
-      "type": "dynamic",
-      "x": 160,
-      "y": 245,
-      "w": 90,
-      "h": 20,
-      "size": 2,
-      "color": "07FF",
-      "data": "wposY",
-      "label": "Y:",
-      "decimals": 2,
-      "showLabel": true
-    },
-    {
-      "type": "dynamic",
-      "x": 260,
-      "y": 245,
-      "w": 90,
-      "h": 20,
-      "size": 2,
-      "color": "07FF",
-      "data": "wposZ",
-      "label": "Z:",
-      "decimals": 2,
-      "showLabel": true
-    },
-    {
-      "type": "dynamic",
-      "x": 360,
-      "y": 245,
-      "w": 90,
-      "h": 20,
-      "size": 2,
-      "color": "07FF",
-      "data": "wposA",
-      "label": "A:",
-      "decimals": 2,
-      "showLabel": true
     }
   ]
 }

@@ -120,8 +120,15 @@ void updateDynamicElements(const ScreenLayout& layout) {
 
             // Redraw the element
             drawElement(elem);
+            
+            // Yield every 5 elements to prevent watchdog timeout
+            if (i % 5 == 0) {
+                yield();
+            }
         }
     }
+    
+    yield();  // Final yield after all updates
 }
 
 // ========== MONITOR MODE ==========
