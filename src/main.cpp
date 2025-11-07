@@ -292,6 +292,13 @@ void setup() {
         }
 
         layoutsLoaded = true;
+        // Add debug output
+        Serial.println("\n=== JSON Layout Status ===");
+        Serial.printf("  monitor.isValid:    %s\n", monitorLayout.isValid ? "TRUE" : "FALSE");
+        Serial.printf("  alignment.isValid:  %s\n", alignmentLayout.isValid ? "TRUE" : "FALSE");
+        Serial.printf("  graph.isValid:      %s\n", graphLayout.isValid ? "TRUE" : "FALSE");
+        Serial.printf("  network.isValid:    %s\n", networkLayout.isValid ? "TRUE" : "FALSE");
+        Serial.println("========================\n");
         Serial.println("=== JSON Layout Loading Complete ===\n");
     } else {
         Serial.println("[JSON] No storage available (SD/SPIFFS), using legacy drawing\n");

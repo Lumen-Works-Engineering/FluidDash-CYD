@@ -1,1 +1,0 @@
-Folder for a html based screen designer that output's json files.

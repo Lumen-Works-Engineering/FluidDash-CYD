@@ -84,15 +84,21 @@ void handleUpload()
 
 void handleEditor()
 {
-    String html = "<!DOCTYPE html><html><head><title>Editor Disabled</title>";
-    html += "<style>body{font-family:Arial;margin:50px;background:#1a1a1a;color:#fff;text-align:center}";
-    html += "h1{color:#ff6600}a{color:#00bfff;text-decoration:none}</style></head><body>";
-    html += "<h1>JSON Editor Temporarily Disabled</h1>";
-    html += "<p>The live editor was causing memory issues and crashes.</p>";
-    html += "<p>Please use the <a href='/upload'>Upload Page</a> to upload JSON files instead.</p>";
-    html += "<p><a href='/'>Back to Dashboard</a></p>";
-    html += "</body></html>";
-    server.send(200, "text/html", html);
+    // Serve editor from filesystem (no memory issues)
+    File file = LittleFS.open("/editor.html", "r");
+    
+    if (!file) {
+        String html = "<!DOCTYPE html><html><head><title>Editor Not Found</title></head><body>";
+        html += "<h1>Editor file not found</h1>";
+        html += "<p>Make sure to upload filesystem: <code>pio run --target uploadfs</code></p>";
+        html += "<p><a href='/'>Back to Dashboard</a></p>";
+        html += "</body></html>";
+        server.send(404, "text/html", html);
+        return;
+    }
+    
+    server.streamFile(file, "text/html");
+    file.close();
 }
 
 // ========== API Handlers (GET) ==========

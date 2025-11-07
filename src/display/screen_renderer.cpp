@@ -23,30 +23,56 @@ extern float *tempHistory;
 extern uint16_t historySize;
 extern uint16_t historyIndex;
 
-void setFont(JsonObject& elem) {
-  if (elem["font"].is<String>()) {
-    String fontName = elem["font"];
-    if (fontName == "FreeSans12pt7b") {
-      // Use LovyanGFX smooth font fallback (replace undefined 'tft')
-      // If you have a different smooth font available, replace &fonts::Font2 with that pointer.
-      gfx.setFont(&fonts::Font2);
+// Smart font selection based on text size
+void selectBestFont(int textSize) {
+    if (textSize >= 2) {
+        gfx.setFont(&fonts::Font4);  // Smooth font for size 2+
     } else {
-      // Unknown named font -> fallback to a default smooth font
-      gfx.setFont(&fonts::Font2);
+        gfx.setFont(&fonts::Font2);  // Fallback font for size 1
     }
-  } else {
-    // Numeric font fallback: map to the same LovyanGFX fallback font to avoid tft dependency
-    int fontNum = elem["font"] | 2;
-    (void)fontNum; // fontNum currently unused; keep to preserve JSON semantics
-    gfx.setFont(&fonts::Font2);
-  }
+}
+
+// Replace ambiguous/undefined createDocument(...) with a proper ArduinoJson document.
+// Use heap allocation to avoid large static/global stack usage.
+DynamicJsonDocument doc(8192);
+
+// Replace applyFontFromJson with safer reads (use .as<T>() and null checks)
+// Replace the previous setFont(JsonObject& elem) implementation with a safe, internal variant-aware helper.
+static void applyFontFromJson(JsonVariantConst jElem) {
+    // Default size
+    int size = 2;
+    if (!jElem.isNull()) {
+        JsonVariantConst sizeVar = jElem["size"];
+        if (!sizeVar.isNull()) size = sizeVar.as<int>();
+    }
+
+    // Safe C-string read for font name
+    const char* fontName = nullptr;
+    if (!jElem.isNull()) {
+        JsonVariantConst fn = jElem["font"];
+        if (!fn.isNull()) fontName = fn.as<const char*>();
+    }
+    if (fontName == nullptr) fontName = "";
+
+    // Compare known font names using strcmp to avoid Arduino String conversion issues
+    if (strlen(fontName) > 0) {
+        if (strcmp(fontName, "FreeSans12pt7b") == 0) {
+            selectBestFont(size);
+        } else {
+            // Unknown named font -> fallback behavior
+            selectBestFont(size);
+        }
+    } else {
+        // Numeric or missing font field -> fallback
+        selectBestFont(size);
+    }
 }
 
 // Since GraphElement is used like other element types, we should use ScreenElement instead
-void renderGraph(const ScreenElement& elem) {
+void renderGraph(const ScreenElement& el) {
     // Draw temperature graph
-    gfx.fillRect(elem.x, elem.y, elem.w, elem.h, elem.bgColor);
-    gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+    gfx.fillRect(el.x, el.y, el.w, el.h, el.bgColor);
+    gfx.drawRect(el.x, el.y, el.w, el.h, el.color);
 
     if (tempHistory != nullptr && historySize > 0) {
         float minTemp = 10.0;
@@ -60,15 +86,15 @@ void renderGraph(const ScreenElement& elem) {
             float temp1 = tempHistory[idx1];
             float temp2 = tempHistory[idx2];
 
-            int x1 = elem.x + ((i - 1) * elem.w / historySize);
-            int y1 = elem.y + elem.h - ((temp1 - minTemp) / (maxTemp - minTemp) * elem.h);
-            int x2 = elem.x + (i * elem.w / historySize);
-            int y2 = elem.y + elem.h - ((temp2 - minTemp) / (maxTemp - minTemp) * elem.h);
+            int x1 = el.x + ((i - 1) * el.w / historySize);
+            int y1 = el.y + el.h - ((temp1 - minTemp) / (maxTemp - minTemp) * el.h);
+            int x2 = el.x + (i * el.w / historySize);
+            int y2 = el.y + el.h - ((temp2 - minTemp) / (maxTemp - minTemp) * el.h);
 
-            y1 = constrain(y1, elem.y, elem.y + elem.h);
-            y2 = constrain(y2, elem.y, elem.y + elem.h);
+            y1 = constrain(y1, el.y, el.y + el.h);
+            y2 = constrain(y2, el.y, el.y + el.h);
 
-            gfx.drawLine(x1, y1, x2, y2, elem.color);
+            gfx.drawLine(x1, y1, x2, y2, el.color);
         }
     }
 }
@@ -138,9 +164,77 @@ TextAlign parseAlignment(const char* alignStr) {
     if (strcmp(alignStr, "right") == 0) return ALIGN_RIGHT;
     return ALIGN_LEFT;
 }
+// Validate and normalize data source names
+bool validateDataSource(const char* source, char* normalizedOut, size_t outSize) {
+    if (!source || strlen(source) == 0) {
+        return false;
+    }
+
+    // Known valid data sources
+    const char* validSources[] = {
+        "rtcDateTime", "dateTime",  // Accept both, normalize to rtcDateTime
+        "temp0", "temp1", "temp2", "temp3",
+        "temp0Peak", "temp1Peak", "temp2Peak", "temp3Peak",
+        "fanSpeed", "fanRPM",
+        "psuVoltage",
+        "machineState", "feedRate", "spindleRPM",
+        "wposX", "wposY", "wposZ", "wposA",
+        "posX", "posY", "posZ", "posA",
+        "ipAddress", "ssid", "deviceName", "fluidncIP"
+    };
+
+    // Check if source matches any valid source
+    for (int i = 0; i < sizeof(validSources) / sizeof(validSources[0]); i++) {
+        if (strcmp(source, validSources[i]) == 0) {
+            // Normalize dateTime -> rtcDateTime
+            if (strcmp(source, "dateTime") == 0) {
+                strncpy(normalizedOut, "rtcDateTime", outSize - 1);
+            } else {
+                strncpy(normalizedOut, source, outSize - 1);
+            }
+            normalizedOut[outSize - 1] = '\\0';
+            return true;
+        }
+    }
+
+    Serial.printf("[JSON] WARNING: Unknown data source '%s'\\n", source);
+    Serial.println("[JSON] Known sources: rtcDateTime, temp0-3, fanSpeed, psuVoltage, etc.");
+
+    // Still copy it (might be added later)
+    strncpy(normalizedOut, source, outSize - 1);
+    normalizedOut[outSize - 1] = '\\0';
+    return false;
+}
 
 // Load screen configuration from JSON file
 bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
+    // Check for expected JSON structure
+    if (!doc["elements"]) {
+        Serial.println("[JSON] ERROR: Missing 'elements' array!");
+        Serial.println("[JSON] Expected format:");
+        Serial.println("[JSON]   { \\\"name\\\": \\\"...\\\", \\\"width\\\": 480, \\\"height\\\": 320, \\\"elements\\\": [...] }");
+        return false;
+    }
+
+    // Warn about missing optional fields
+    if (!doc["width"]) {
+        Serial.println("[JSON] Warning: Missing 'width' field (assuming 480)");
+    }
+    if (!doc["height"]) {
+        Serial.println("[JSON] Warning: Missing 'height' field (assuming 320)");
+    }
+
+    // Check for old schema (uses 'source' instead of 'data')
+    JsonArray elements = doc["elements"].as<JsonArray>();
+    if (elements.size() > 0) {
+        JsonObject firstElem = elements[0];
+        if (firstElem["source"] && !firstElem["data"]) {
+            Serial.println("[JSON] ERROR: Old JSON schema detected!");
+            Serial.println("[JSON] This file uses 'source' field, but renderer expects 'data'");
+            Serial.println("[JSON] Please update JSON files to use 'data' instead of 'source'");
+            return false;
+        }
+    }
     Serial.printf("[JSON] Loading screen config: %s\n", filename);
 
     // Use StorageManager to load file (auto-fallback SD->SPIFFS)
@@ -162,9 +256,6 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     // CRITICAL: Yield before JSON parsing (prevents mutex deadlock)
     yield();
 
-    // Parse JSON - use heap allocation to avoid stack issues
-    JsonDocument doc;
-
     yield();  // Yield before deserialize
     DeserializationError error = deserializeJson(doc, jsonContent);
     yield();  // Yield after deserialize
@@ -173,6 +264,11 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
         Serial.printf("[JSON] Parse error: %s\n", error.c_str());
         return false;
     }
+
+    // ===== ENHANCED ERROR CHECKING =====
+    // NOTE: Removed misplaced validation block that referenced undefined variables (elem, elementIndex)
+    // The per-element validation is now performed inside the element parsing loop below.
+    // ===== END ERROR CHECKING =====
 
     // Extract layout info
     strncpy(layout.name, doc["name"] | "Unnamed", sizeof(layout.name) - 1);
@@ -188,7 +284,10 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
     }
 
     int elementIndex = 0;
-    for (JsonObject elem : elements) {
+    // Iterate as JsonVariantConst then convert to JsonObjectConst to ensure proper typing
+    for (JsonVariantConst v : elements) {
+        JsonObjectConst obj = v.as<JsonObjectConst>();
+
         if (elementIndex >= 60) {
             Serial.println("[JSON] Warning: Max 60 elements, ignoring rest");
             break;
@@ -196,26 +295,47 @@ bool loadScreenConfig(const char* filename, ScreenLayout& layout) {
 
         yield();  // Yield during element parsing loop
 
+        // New: validate required "type" field in the correct (loop) scope
+        if (!obj["type"]) {
+            Serial.printf("[JSON] Warning: Element %d missing 'type' field, skipping\n", elementIndex);
+            elementIndex++; // keep index consistent with skipped element count
+            continue;
+        }
+
         ScreenElement& se = layout.elements[elementIndex];
 
         // Parse element properties
-        se.type = parseElementType(elem["type"] | "none");
-        se.x = elem["x"] | 0;
-        se.y = elem["y"] | 0;
-        se.w = elem["w"] | 0;
-        se.h = elem["h"] | 0;
-        se.color = parseColor(elem["color"] | "FFFF");
-        se.bgColor = parseColor(elem["bgColor"] | "0000");
-        se.textSize = elem["size"] | 2;
-        se.decimals = elem["decimals"] | 2;
-        se.filled = elem["filled"] | true;
-        se.showLabel = elem["showLabel"] | true;
-        se.align = parseAlignment(elem["align"] | "left");
+        se.type = parseElementType(obj["type"] | "none");
+        se.x = obj["x"] | 0;
+        se.y = obj["y"] | 0;
+        se.w = obj["w"] | 0;
+        se.h = obj["h"] | 0;
+        se.color = parseColor(obj["color"] | "FFFF");
+        se.bgColor = parseColor(obj["bgColor"] | "0000");
+        se.textSize = obj["size"] | 2;
+        se.decimals = obj["decimals"] | 2;
+        se.filled = obj["filled"] | true;
+        se.showLabel = obj["showLabel"] | true;
+        se.align = parseAlignment(obj["align"] | "left");
 
         // Copy strings
-        strncpy(se.label, elem["label"] | "", sizeof(se.label) - 1);
-        strncpy(se.dataSource, elem["data"] | "", sizeof(se.dataSource) - 1);
+        strncpy(se.label, obj["label"] | "", sizeof(se.label) - 1);
+        //strncpy(se.dataSource, obj["data"] | "", sizeof(se.dataSource) - 1);
+        // Parse and validate data source
+        const char* rawDataSource = obj["data"] | "";
+        char normalizedSource[32];
 
+        if (strlen(rawDataSource) > 0) {
+            bool isValid = validateDataSource(rawDataSource, normalizedSource, sizeof(normalizedSource));
+            strncpy(se.dataSource, normalizedSource, sizeof(se.dataSource) - 1);
+
+            if (!isValid) {
+                Serial.printf("[JSON] Element %d uses unrecognized data source: %s\n", 
+                            elementIndex, rawDataSource);
+            }
+        } else {
+            se.dataSource[0] = '\0';
+        }
         elementIndex++;
     }
 
@@ -312,7 +432,7 @@ String getDataString(const char* dataSource) {
             sprintf(buffer, "%02d/%02d/%04d", now.month(), now.day(), now.year());
             return String(buffer);
         }
-        if (strcmp(dataSource, "rtcDateTime") == 0) {
+        if (strcmp(dataSource, "rtcDateTime") == 0 || strcmp(dataSource, "dateTime") == 0) {
             // Format: YYYY-MM-DD HH:MM:SS
             sprintf(buffer, "%04d-%02d-%02d %02d:%02d:%02d",
                     now.year(), now.month(), now.day(),
@@ -334,53 +454,53 @@ String getDataString(const char* dataSource) {
 // ========== DRAWING FUNCTIONS ==========
 
 // Draw a single screen element
-void drawElement(const ScreenElement& elem) {
-    switch(elem.type) {
+void drawElement(const ScreenElement& el) {
+    switch(el.type) {
         case ELEM_RECT:
-            if (elem.filled) {
-                gfx.fillRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+            if (el.filled) {
+                gfx.fillRect(el.x, el.y, el.w, el.h, el.color);
             } else {
-                gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+                gfx.drawRect(el.x, el.y, el.w, el.h, el.color);
             }
             break;
 
         case ELEM_LINE:
-            if (elem.w > elem.h) {
+            if (el.w > el.h) {
                 // Horizontal line
-                gfx.drawFastHLine(elem.x, elem.y, elem.w, elem.color);
+                gfx.drawFastHLine(el.x, el.y, el.w, el.color);
             } else {
                 // Vertical line
-                gfx.drawFastVLine(elem.x, elem.y, elem.h, elem.color);
+                gfx.drawFastVLine(el.x, el.y, el.h, el.color);
             }
             break;
 
         case ELEM_TEXT_STATIC:
             {
-                gfx.setTextColor(elem.color);
-                gfx.setTextSize(elem.textSize);
+                gfx.setTextColor(el.color);
+                gfx.setTextSize(el.textSize);
 
                 // Use old rendering if no w/h specified (backward compatibility)
-                if (elem.w == 0 || elem.h == 0) {
-                    gfx.setCursor(elem.x, elem.y);
-                    gfx.print(elem.label);
+                if (el.w == 0 || el.h == 0) {
+                    gfx.setCursor(el.x, el.y);
+                    gfx.print(el.label);
                 } else {
                     // Use LovyanGFX smooth font rendering
-                    gfx.setFont(&fonts::Font2);
-                    float scale = elem.textSize * 1.0f;
+                    selectBestFont(el.textSize);
+                    float scale = el.textSize * 1.0f;
                     gfx.setTextSize(scale, scale);
 
-                    switch(elem.align) {
+                    switch(el.align) {
                         case ALIGN_CENTER:
                             gfx.setTextDatum(textdatum_t::middle_center);
-                            gfx.drawString(elem.label, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            gfx.drawString(el.label, el.x + el.w / 2, el.y + el.h / 2);
                             break;
                         case ALIGN_RIGHT:
                             gfx.setTextDatum(textdatum_t::middle_right);
-                            gfx.drawString(elem.label, elem.x + elem.w, elem.y + elem.h / 2);
+                            gfx.drawString(el.label, el.x + el.w, el.y + el.h / 2);
                             break;
                         default:  // ALIGN_LEFT
                             gfx.setTextDatum(textdatum_t::middle_left);
-                            gfx.drawString(elem.label, elem.x, elem.y + elem.h / 2);
+                            gfx.drawString(el.label, el.x, el.y + el.h / 2);
                             break;
                     }
                 }
@@ -389,43 +509,43 @@ void drawElement(const ScreenElement& elem) {
 
         case ELEM_TEXT_DYNAMIC:
             {
-                gfx.setTextColor(elem.color);
-                gfx.setTextSize(elem.textSize);
+                gfx.setTextColor(el.color);
+                gfx.setTextSize(el.textSize);
 
-                String value = getDataString(elem.dataSource);
+                String value = getDataString(el.dataSource);
 
                 // Use old rendering if no w/h specified (backward compatibility)
-                if (elem.w == 0 || elem.h == 0) {
-                    gfx.setCursor(elem.x, elem.y);
-                    if (elem.showLabel && strlen(elem.label) > 0) {
-                        gfx.print(elem.label);
+                if (el.w == 0 || el.h == 0) {
+                    gfx.setCursor(el.x, el.y);
+                    if (el.showLabel && el.label[0] != '\0') {
+                        gfx.print(el.label);
                     }
                     gfx.print(value);
                 } else {
                     // Use LovyanGFX smooth font rendering
-                    gfx.setFont(&fonts::Font2);
-                    float scale = elem.textSize * 1.0f;
+                    selectBestFont(el.textSize);
+                    float scale = el.textSize * 1.0f;
                     gfx.setTextSize(scale, scale);
 
                     String displayText = "";
-                    if (elem.showLabel && strlen(elem.label) > 0) {
-                        displayText = String(elem.label) + value;
+                    if (el.showLabel && el.label[0] != '\0') {
+                        displayText = String(el.label) + value;
                     } else {
                         displayText = value;
                     }
 
-                    switch(elem.align) {
+                    switch(el.align) {
                         case ALIGN_CENTER:
                             gfx.setTextDatum(textdatum_t::middle_center);
-                            gfx.drawString(displayText, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x + el.w / 2, el.y + el.h / 2);
                             break;
                         case ALIGN_RIGHT:
                             gfx.setTextDatum(textdatum_t::middle_right);
-                            gfx.drawString(displayText, elem.x + elem.w, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x + el.w, el.y + el.h / 2);
                             break;
                         default:  // ALIGN_LEFT
                             gfx.setTextDatum(textdatum_t::middle_left);
-                            gfx.drawString(displayText, elem.x, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x, el.y + el.h / 2);
                             break;
                     }
                 }
@@ -434,51 +554,51 @@ void drawElement(const ScreenElement& elem) {
 
         case ELEM_TEMP_VALUE:
             {
-                gfx.setTextColor(elem.color);
-                gfx.setTextSize(elem.textSize);
+                gfx.setTextColor(el.color);
+                gfx.setTextSize(el.textSize);
 
-                float temp = getDataValue(elem.dataSource);
+                float temp = getDataValue(el.dataSource);
                 if (cfg.use_fahrenheit) {
                     temp = temp * 9.0 / 5.0 + 32.0;
                 }
 
                 // Use old rendering if no w/h specified (backward compatibility)
-                if (elem.w == 0 || elem.h == 0) {
-                    gfx.setCursor(elem.x, elem.y);
-                    if (elem.showLabel && strlen(elem.label) > 0) {
-                        gfx.print(elem.label);
+                if (el.w == 0 || el.h == 0) {
+                    gfx.setCursor(el.x, el.y);
+                    if (el.showLabel && el.label[0] != '\0') {
+                        gfx.print(el.label);
                     }
-                    gfx.printf("%.*f%c", elem.decimals, temp,
+                    gfx.printf("%.*f%c", el.decimals, temp,
                               cfg.use_fahrenheit ? 'F' : 'C');
                 } else {
                     // Use LovyanGFX smooth font rendering
-                    gfx.setFont(&fonts::Font2);
-                    float scale = elem.textSize * 1.0f;
+                    selectBestFont(el.textSize);
+                    float scale = el.textSize * 1.0f;
                     gfx.setTextSize(scale, scale);
 
                     char tempStr[32];
-                    snprintf(tempStr, sizeof(tempStr), "%.*f%c", elem.decimals, temp,
+                    snprintf(tempStr, sizeof(tempStr), "%.*f%c", el.decimals, temp,
                             cfg.use_fahrenheit ? 'F' : 'C');
 
                     String displayText = "";
-                    if (elem.showLabel && strlen(elem.label) > 0) {
-                        displayText = String(elem.label) + String(tempStr);
+                    if (el.showLabel && el.label[0] != '\0') {
+                        displayText = String(el.label) + String(tempStr);
                     } else {
                         displayText = String(tempStr);
                     }
 
-                    switch(elem.align) {
+                    switch(el.align) {
                         case ALIGN_CENTER:
                             gfx.setTextDatum(textdatum_t::middle_center);
-                            gfx.drawString(displayText, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x + el.w / 2, el.y + el.h / 2);
                             break;
                         case ALIGN_RIGHT:
                             gfx.setTextDatum(textdatum_t::middle_right);
-                            gfx.drawString(displayText, elem.x + elem.w, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x + el.w, el.y + el.h / 2);
                             break;
                         default:  // ALIGN_LEFT
                             gfx.setTextDatum(textdatum_t::middle_left);
-                            gfx.drawString(displayText, elem.x, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x, el.y + el.h / 2);
                             break;
                     }
                 }
@@ -487,49 +607,49 @@ void drawElement(const ScreenElement& elem) {
 
         case ELEM_COORD_VALUE:
             {
-                gfx.setTextColor(elem.color);
-                gfx.setTextSize(elem.textSize);
+                gfx.setTextColor(el.color);
+                gfx.setTextSize(el.textSize);
 
-                float value = getDataValue(elem.dataSource);
+                float value = getDataValue(el.dataSource);
                 if (cfg.use_inches) {
                     value = value / 25.4;
                 }
 
                 // Use old rendering if no w/h specified (backward compatibility)
-                if (elem.w == 0 || elem.h == 0) {
-                    gfx.setCursor(elem.x, elem.y);
-                    if (elem.showLabel && strlen(elem.label) > 0) {
-                        gfx.print(elem.label);
+                if (el.w == 0 || el.h == 0) {
+                    gfx.setCursor(el.x, el.y);
+                    if (el.showLabel && el.label[0] != '\0') {
+                        gfx.print(el.label);
                     }
-                    gfx.printf("%.*f", elem.decimals, value);
+                    gfx.printf("%.*f", el.decimals, value);
                 } else {
                     // Use LovyanGFX smooth font rendering
-                    gfx.setFont(&fonts::Font2);
-                    float scale = elem.textSize * 1.0f;
+                    selectBestFont(el.textSize);
+                    float scale = el.textSize * 1.0f;
                     gfx.setTextSize(scale, scale);
 
                     char coordStr[32];
-                    snprintf(coordStr, sizeof(coordStr), "%.*f", elem.decimals, value);
+                    snprintf(coordStr, sizeof(coordStr), "%.*f", el.decimals, value);
 
                     String displayText = "";
-                    if (elem.showLabel && strlen(elem.label) > 0) {
-                        displayText = String(elem.label) + String(coordStr);
+                    if (el.showLabel && el.label[0] != '\0') {
+                        displayText = String(el.label) + String(coordStr);
                     } else {
                         displayText = String(coordStr);
                     }
 
-                    switch(elem.align) {
+                    switch(el.align) {
                         case ALIGN_CENTER:
                             gfx.setTextDatum(textdatum_t::middle_center);
-                            gfx.drawString(displayText, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x + el.w / 2, el.y + el.h / 2);
                             break;
                         case ALIGN_RIGHT:
                             gfx.setTextDatum(textdatum_t::middle_right);
-                            gfx.drawString(displayText, elem.x + elem.w, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x + el.w, el.y + el.h / 2);
                             break;
                         default:  // ALIGN_LEFT
                             gfx.setTextDatum(textdatum_t::middle_left);
-                            gfx.drawString(displayText, elem.x, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x, el.y + el.h / 2);
                             break;
                     }
                 }
@@ -538,55 +658,55 @@ void drawElement(const ScreenElement& elem) {
 
         case ELEM_STATUS_VALUE:
             {
-                gfx.setTextSize(elem.textSize);
+                gfx.setTextSize(el.textSize);
 
                 // Color-code machine state
-                if (strcmp(elem.dataSource, "machineState") == 0) {
+                if (strcmp(el.dataSource, "machineState") == 0) {
                     if (machineState == "RUN") {
                         gfx.setTextColor(COLOR_GOOD);
                     } else if (machineState == "ALARM") {
                         gfx.setTextColor(COLOR_WARN);
                     } else {
-                        gfx.setTextColor(elem.color);
+                        gfx.setTextColor(el.color);
                     }
                 } else {
-                    gfx.setTextColor(elem.color);
+                    gfx.setTextColor(el.color);
                 }
 
-                String value = getDataString(elem.dataSource);
+                String value = getDataString(el.dataSource);
 
                 // Use old rendering if no w/h specified (backward compatibility)
-                if (elem.w == 0 || elem.h == 0) {
-                    gfx.setCursor(elem.x, elem.y);
-                    if (elem.showLabel && strlen(elem.label) > 0) {
-                        gfx.print(elem.label);
+                if (el.w == 0 || el.h == 0) {
+                    gfx.setCursor(el.x, el.y);
+                    if (el.showLabel && el.label[0] != '\0') {
+                        gfx.print(el.label);
                     }
                     gfx.print(value);
                 } else {
                     // Use LovyanGFX smooth font rendering
-                    gfx.setFont(&fonts::Font2);
-                    float scale = elem.textSize * 1.0f;
+                    selectBestFont(el.textSize);
+                    float scale = el.textSize * 1.0f;
                     gfx.setTextSize(scale, scale);
 
                     String displayText = "";
-                    if (elem.showLabel && strlen(elem.label) > 0) {
-                        displayText = String(elem.label) + value;
+                    if (el.showLabel && el.label[0] != '\0') {
+                        displayText = String(el.label) + value;
                     } else {
                         displayText = value;
                     }
 
-                    switch(elem.align) {
+                    switch(el.align) {
                         case ALIGN_CENTER:
                             gfx.setTextDatum(textdatum_t::middle_center);
-                            gfx.drawString(displayText, elem.x + elem.w / 2, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x + el.w / 2, el.y + el.h / 2);
                             break;
                         case ALIGN_RIGHT:
                             gfx.setTextDatum(textdatum_t::middle_right);
-                            gfx.drawString(displayText, elem.x + elem.w, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x + el.w, el.y + el.h / 2);
                             break;
                         default:  // ALIGN_LEFT
                             gfx.setTextDatum(textdatum_t::middle_left);
-                            gfx.drawString(displayText, elem.x, elem.y + elem.h / 2);
+                            gfx.drawString(displayText, el.x, el.y + el.h / 2);
                             break;
                     }
                 }
@@ -596,16 +716,16 @@ void drawElement(const ScreenElement& elem) {
         case ELEM_PROGRESS_BAR:
             {
                 // Draw outline
-                gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+                gfx.drawRect(el.x, el.y, el.w, el.h, el.color);
 
                 // Calculate progress (placeholder - would need job tracking)
                 int progress = 0;  // 0-100%
-                int fillWidth = (elem.w - 2) * progress / 100;
+                int fillWidth = (el.w - 2) * progress / 100;
 
                 // Draw filled portion
                 if (fillWidth > 0) {
-                    gfx.fillRect(elem.x + 1, elem.y + 1,
-                               fillWidth, elem.h - 2, elem.color);
+                    gfx.fillRect(el.x + 1, el.y + 1,
+                               fillWidth, el.h - 2, el.color);
                 }
             }
             break;
@@ -613,8 +733,8 @@ void drawElement(const ScreenElement& elem) {
         case ELEM_GRAPH:
             {
                 // Draw temperature graph
-                gfx.fillRect(elem.x, elem.y, elem.w, elem.h, elem.bgColor);
-                gfx.drawRect(elem.x, elem.y, elem.w, elem.h, elem.color);
+                gfx.fillRect(el.x, el.y, el.w, el.h, el.bgColor);
+                gfx.drawRect(el.x, el.y, el.w, el.h, el.color);
 
                 if (tempHistory != nullptr && historySize > 0) {
                     float minTemp = 10.0;
@@ -628,13 +748,13 @@ void drawElement(const ScreenElement& elem) {
                         float temp1 = tempHistory[idx1];
                         float temp2 = tempHistory[idx2];
 
-                        int x1 = elem.x + ((i - 1) * elem.w / historySize);
-                        int y1 = elem.y + elem.h - ((temp1 - minTemp) / (maxTemp - minTemp) * elem.h);
-                        int x2 = elem.x + (i * elem.w / historySize);
-                        int y2 = elem.y + elem.h - ((temp2 - minTemp) / (maxTemp - minTemp) * elem.h);
+                        int x1 = el.x + ((i - 1) * el.w / historySize);
+                        int y1 = el.y + el.h - ((temp1 - minTemp) / (maxTemp - minTemp) * el.h);
+                        int x2 = el.x + (i * el.w / historySize);
+                        int y2 = el.y + el.h - ((temp2 - minTemp) / (maxTemp - minTemp) * el.h);
 
-                        y1 = constrain(y1, elem.y, elem.y + elem.h);
-                        y2 = constrain(y2, elem.y, elem.y + elem.h);
+                        y1 = constrain(y1, el.y, el.y + el.h);
+                        y2 = constrain(y2, el.y, el.y + el.h);
 
                         // Color based on temperature (use element color or threshold-based)
                         uint16_t color;
@@ -647,12 +767,12 @@ void drawElement(const ScreenElement& elem) {
 
                     // Scale markers
                     gfx.setTextSize(1);
-                    gfx.setTextColor(elem.color);
-                    gfx.setCursor(elem.x + 3, elem.y + 2);
+                    gfx.setTextColor(el.color);
+                    gfx.setCursor(el.x + 3, el.y + 2);
                     gfx.print("60");
-                    gfx.setCursor(elem.x + 3, elem.y + elem.h / 2 - 5);
+                    gfx.setCursor(el.x + 3, el.y + el.h / 2 - 5);
                     gfx.print("35");
-                    gfx.setCursor(elem.x + 3, elem.y + elem.h - 10);
+                    gfx.setCursor(el.x + 3, el.y + el.h - 10);
                     gfx.print("10");
                 }
             }

@@ -436,6 +436,15 @@
             </div>
         </div>
 
+        <div class="property-group">
+            <label class="property-label">Text Size</label>
+            <select onchange="updateElementProperty(selectedElementId, 'size', parseInt(this.value))">
+                <option value="1" ${element.size === 1 ? 'selected' : ''}>Size 1 (Small - Font2)</option>
+                <option value="2" ${element.size === 2 ? 'selected' : ''}>Size 2 (Medium - Font4)</option>
+                <option value="3" ${element.size === 3 ? 'selected' : ''}>Size 3 (Large - Font4)</option>
+            </select>
+        </div>
+
         <div class="properties" id="propertiesPanel" style="display: none;">
             <h2>Element Properties</h2>
             <div id="propertyInputs"></div>
@@ -496,7 +505,7 @@
 
         function rgb565ToRgb(hex) {
             if (!hex) return '#000000';
-            const upper = hex.toUpperCase();
+            const upper = String(hex || '0000').toUpperCase();
             if (colorPresets[upper]) return colorPresets[upper];
             const val = parseInt(hex, 16);
             const r = ((val >> 11) & 0x1F) * 255 / 31;
@@ -754,6 +763,16 @@
                 ctx.strokeStyle = '#00FFFF';
                 ctx.lineWidth = 2;
                 ctx.strokeRect(el.x - 2, el.y - 2, (el.w || 50) + 4, (el.h || 20) + 4);
+            }
+                
+            if (element.type === 'text' || element.type === 'dynamic') {
+                // Simulate Font4 vs Font2
+                if (element.size >= 2) {
+                    ctx.font = 'bold 14px Arial';  // Simulates Font4
+                } else {
+                    ctx.font = '12px Arial';  // Simulates Font2
+                }
+                ctx.fillText(element.text || element.data || element.type, element.x + 2, element.y + 15);
             }
         }
 
