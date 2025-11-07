@@ -108,6 +108,7 @@ unsigned long lastTachRead = 0;
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastHistoryUpdate = 0;
 unsigned long lastStatusRequest = 0;
+unsigned long lastConnectionAttempt = 0;  // Track WebSocket connection attempts
 unsigned long sessionStartTime = 0;
 unsigned long buttonPressStart = 0;
 bool buttonPressed = false;
@@ -217,6 +218,21 @@ void setup() {
 
   if (WiFi.status() == WL_CONNECTED) {
     // Successfully connected to WiFi
+    yield();
+          // Only call webSocket.loop() frequently when connected
+      if (fluidncConnected) {
+          webSocket.loop();  // Connected: call every loop
+          yield();
+      } else {
+          // Disconnected: only try every 5 seconds
+          if (millis() - lastConnectionAttempt >= 5000) {
+              Serial.println("[FluidNC] Attempting reconnection...");
+              webSocket.loop();
+              lastConnectionAttempt = millis();
+              yield();
+          }
+      }
+
     Serial.println("WiFi Connected!");
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
